@@ -5,11 +5,13 @@ from . import arrow_head_types as Mark
 from itertools import combinations
 import numpy as np
 
+
 class PAG(MixedGraph):
     """
     Partial Ancestral Graph. It has three arrow-head/edge-mark types: 'circle', 'undirected', and 'directed',
     and six edge types: o--o, o---, o-->, --->, <-->, and ----
     """
+
     def __init__(self, nodes_set):
         super().__init__(nodes_set, [Mark.Circle, Mark.Directed, Mark.Tail])
         self.sepset = constraint_based.SeparationSet(nodes_set)
@@ -63,8 +65,42 @@ class PAG(MixedGraph):
         for node_i in range(num_vars):
             for node_j in range(num_vars):
                 if adj_mat[node_i, node_j] > 0:
-                    arrow_type = arrow_type_map[adj_mat[node_i, node_j]]  # edge mark node_i ---[*] node_j
-                    self._graph[nodes_order[node_j]][arrow_type].add(nodes_order[node_i])  # add to node_j edge mark [*]
+                    arrow_type = arrow_type_map[
+                        adj_mat[node_i, node_j]
+                    ]  # edge mark node_i ---[*] node_j
+                    self._graph[nodes_order[node_j]][arrow_type].add(
+                        nodes_order[node_i]
+                    )  # add to node_j edge mark [*]
+
+    def apply_domain_knowledge(
+        self, domain_knowledge: list[constraint_based.DomainKnowledge]
+    ):
+        """
+        applies domain knowledge to the PAG.
+        :param domain_knowledge: a list of domain knowledge.
+        :return:
+        """
+        marks = [Mark.Circle, Mark.Directed, Mark.Tail, Mark.Undirected]
+        for dk in domain_knowledge:
+            node_from = dk.node_from
+            node_to = dk.node_to
+            relationship = dk.relationship
+            if relationship == constraint_based.Relationship.CAUSE:
+                self.replace_edge_mark(node_from, node_to, Mark.Directed)
+                self.replace_edge_mark(node_to, node_from, Mark.Undirected)
+                print(self._graph)
+
+            if relationship == constraint_based.Relationship.CANNOT_CAUSE:
+                if self.is_connected(node_from, node_to):
+                    fwd_relationship = self.get_edge_mark(node_from, node_to)
+                    if fwd_relationship == Mark.Directed:
+                        inv_relationship = self.get_edge_mark(node_to, node_from)
+                        if inv_relationship == Mark.Undirected:
+                            self.delete_edge(node_from, node_to)
+                        else:
+                            self.replace_edge_mark(node_from, node_to, Mark.Circle)
+                    else:
+                        self.replace_edge_mark(node_to, node_from, Mark.Directed)
 
     def get_adj_mat(self):
         """
@@ -88,9 +124,41 @@ class PAG(MixedGraph):
         for node in self._graph:
             for edge_mark in self.edge_mark_types:
                 for node_p in self._graph[node][edge_mark]:
-                    adj_mat[node_index_map[node_p]][node_index_map[node]] = arrow_type_map[edge_mark]
+                    adj_mat[node_index_map[node_p]][
+                        node_index_map[node]
+                    ] = arrow_type_map[edge_mark]
 
         return adj_mat
+
+    def get_adj_mat_with_cols(self):
+        """
+        converts a PAG to an adjacency matrix with the following coding:
+         0: No edge
+         1: Circle
+         2: Arrowhead
+         3: Tail
+        :return: a square numpy matrix format.
+        """
+        num_vars = len(self.nodes_set)
+        adj_mat = np.zeros((num_vars, num_vars), dtype=int)
+        node_index_map = {node: i for i, node in enumerate(sorted(self.nodes_set))}
+
+        # convert adjacency to PAG
+        arrow_type_map = dict()
+        arrow_type_map[Mark.Circle] = 1
+        arrow_type_map[Mark.Directed] = 2
+        arrow_type_map[Mark.Tail] = 3
+
+        for node in self._graph:
+            for edge_mark in self.edge_mark_types:
+                for node_p in self._graph[node][edge_mark]:
+                    adj_mat[node_index_map[node_p]][
+                        node_index_map[node]
+                    ] = arrow_type_map[edge_mark]
+
+        index_node_map = {i: node for node, i in node_index_map.items()}
+
+        return adj_mat, index_node_map
 
     def fan_in(self, target_node):
         """
@@ -98,7 +166,9 @@ class PAG(MixedGraph):
         :param target_node: a node
         :return: Fan-in of node target_node
         """
-        return len(self._graph[target_node][Mark.Directed]) + len(self._graph[target_node][Mark.Circle])
+        return len(self._graph[target_node][Mark.Directed]) + len(
+            self._graph[target_node][Mark.Circle]
+        )
 
     def is_collider(self, node_middle, node_x, node_y):
         """
@@ -125,12 +195,15 @@ class PAG(MixedGraph):
         :param node_y: third node
         :return: 'True' if the middle node is a possible collider
         """
-        if node_x == node_y or \
-                (not self.is_connected(node_x, node_middle)) or \
-                (not self.is_connected(node_middle, node_y)):  # make sure there is a path: X *--* Middle *--* Y
+        if (
+            node_x == node_y
+            or (not self.is_connected(node_x, node_middle))
+            or (not self.is_connected(node_middle, node_y))
+        ):  # make sure there is a path: X *--* Middle *--* Y
             return False
-        return self.is_connected(node_x, node_y) or \
-               self.is_collider(node_middle=node_middle, node_x=node_x, node_y=node_y)
+        return self.is_connected(node_x, node_y) or self.is_collider(
+            node_middle=node_middle, node_x=node_x, node_y=node_y
+        )
 
     def is_possible_parent(self, potential_parent_node, child_node):
         """
@@ -148,8 +221,9 @@ class PAG(MixedGraph):
         if not self.is_connected(potential_parent_node, child_node):
             return False
 
-        if ((potential_parent_node in self._graph[child_node][Mark.Tail]) or
-                (child_node in self._graph[potential_parent_node][Mark.Directed])):
+        if (potential_parent_node in self._graph[child_node][Mark.Tail]) or (
+            child_node in self._graph[potential_parent_node][Mark.Directed]
+        ):
             return False
         else:
             return True
@@ -167,7 +241,9 @@ class PAG(MixedGraph):
             en_nodes = self.nodes_set - {parent_node}
         potential_child_nodes = set()
         for potential_node in en_nodes:
-            if self.is_possible_parent(potential_parent_node=parent_node, child_node=potential_node):
+            if self.is_possible_parent(
+                potential_parent_node=parent_node, child_node=potential_node
+            ):
                 potential_child_nodes.add(potential_node)
 
         return potential_child_nodes
@@ -176,7 +252,11 @@ class PAG(MixedGraph):
         if en_nodes is None:
             en_nodes = self.nodes_set - {child_node}
 
-        possible_parents = {parent_node for parent_node in en_nodes if self.is_possible_parent(parent_node, child_node)}
+        possible_parents = {
+            parent_node
+            for parent_node in en_nodes
+            if self.is_possible_parent(parent_node, child_node)
+        }
         return possible_parents
 
     def is_parent(self, node_parent, node_child):
@@ -186,8 +266,9 @@ class PAG(MixedGraph):
         :param node_child:
         :return: True if the relation exists in the graph; otherwise, False
         """
-        return ((node_parent in self._graph[node_child][Mark.Directed]) and
-                (node_child in self._graph[node_parent][Mark.Tail]))
+        return (node_parent in self._graph[node_child][Mark.Directed]) and (
+            node_child in self._graph[node_parent][Mark.Tail]
+        )
 
     def find_parents(self, node_child):
         """
@@ -198,7 +279,9 @@ class PAG(MixedGraph):
         parent_nodes = set()
         potential_parents = self._graph[node_child][Mark.Directed]
         for potential_node in potential_parents:
-            if node_child in self._graph[potential_node][Mark.Tail]:  # should have a tail at the parent
+            if (
+                node_child in self._graph[potential_node][Mark.Tail]
+            ):  # should have a tail at the parent
                 parent_nodes.add(potential_node)
         return parent_nodes
 
@@ -208,11 +291,14 @@ class PAG(MixedGraph):
         :param node: the node for which spouses are searched
         :return: A set of nodes connected to the node by bi-directed edges
         """
-        spouses = set(filter(
-            lambda possible_spouse: possible_spouse in self._graph[node][Mark.Directed] and
-                                    node in self._graph[possible_spouse][Mark.Directed],
-            self.nodes_set
-        ))
+        spouses = set(
+            filter(
+                lambda possible_spouse: possible_spouse
+                in self._graph[node][Mark.Directed]
+                and node in self._graph[possible_spouse][Mark.Directed],
+                self.nodes_set,
+            )
+        )
         return spouses
 
     def find_visible_edges(self):
@@ -238,7 +324,9 @@ class PAG(MixedGraph):
         :param child:
         :return:
         """
-        assert self.visible_edges is not None  # need to call self.find_visible_edges() first
+        assert (
+            self.visible_edges is not None
+        )  # need to call self.find_visible_edges() first
 
         if (parent, child) in self.visible_edges:
             return True
@@ -260,10 +348,14 @@ class PAG(MixedGraph):
             return False
 
         # discard nodes that are connected to node B
-        c_nodes = set(filter(
-            lambda node: not self.is_connected(node_b, node),  # keep only nodes disconnected from B
-            self.nodes_set - {node_b}
-        ))
+        c_nodes = set(
+            filter(
+                lambda node: not self.is_connected(
+                    node_b, node
+                ),  # keep only nodes disconnected from B
+                self.nodes_set - {node_b},
+            )
+        )
         c_nodes.discard(node_a)
         c_nodes.discard(node_b)
 
@@ -279,10 +371,12 @@ class PAG(MixedGraph):
         spouse_set = self.find_spouses(node_a)
 
         # every node on the collider path (except the end-points) must be a parent of B
-        d_nodes = set(filter(
-            lambda node: self.is_parent(node_parent=node, node_child=node_b),
-            spouse_set
-        ))
+        d_nodes = set(
+            filter(
+                lambda node: self.is_parent(node_parent=node, node_child=node_b),
+                spouse_set,
+            )
+        )
 
         for node_d in d_nodes:
             node_c = self.find_discriminating_path_to_triplet(node_d, node_a, node_b)
@@ -290,7 +384,9 @@ class PAG(MixedGraph):
                 return True  # found a path, the edge is "visible"
         return False  # no path was found, the edge is invisible
 
-    def find_uncovered_path(self, node_x, node_y, neighbor_x, neighbor_y, en_nodes=None, edge_condition=None):
+    def find_uncovered_path(
+        self, node_x, node_y, neighbor_x, neighbor_y, en_nodes=None, edge_condition=None
+    ):
         """
         Find a path <X, Neighbor_X, ..., Neighbor_Y, Y> such that for every three consecutive nodes <V, U, W>,
         V and W are disconnected.
@@ -322,26 +418,39 @@ class PAG(MixedGraph):
         en_nodes = en_nodes - {node_x, node_y, neighbor_x, neighbor_y}
 
         # Exit condition of the recursion: a trivial uncovered path
-        if edge_condition(neighbor_x, neighbor_y) and \
-                (not self.is_connected(neighbor_x, node_y)) and \
-                (not self.is_connected(node_x, neighbor_y)):
+        if (
+            edge_condition(neighbor_x, neighbor_y)
+            and (not self.is_connected(neighbor_x, node_y))
+            and (not self.is_connected(node_x, neighbor_y))
+        ):
             return [neighbor_x, neighbor_y]  # found a trivial path
 
         # Find path extensions: node_x --- neighbor_x --- node_c
         # s.t. neighbor_x --- node_c is a qualifying edge and node_x is disconnected from node_c
-        c_nodes = {tested_node for tested_node in self.find_adjacent_nodes(neighbor_x, en_nodes)
-                   if edge_condition(neighbor_x, tested_node) and not self.is_connected(node_x, tested_node)}
+        c_nodes = {
+            tested_node
+            for tested_node in self.find_adjacent_nodes(neighbor_x, en_nodes)
+            if edge_condition(neighbor_x, tested_node)
+            and not self.is_connected(node_x, tested_node)
+        }
 
         for node_c in c_nodes:
-            path = self.find_uncovered_path(node_x=neighbor_x, node_y=node_y,
-                                            neighbor_x=node_c, neighbor_y=neighbor_y,
-                                            en_nodes=en_nodes, edge_condition=edge_condition)
+            path = self.find_uncovered_path(
+                node_x=neighbor_x,
+                node_y=node_y,
+                neighbor_x=node_c,
+                neighbor_y=neighbor_y,
+                en_nodes=en_nodes,
+                edge_condition=edge_condition,
+            )
             if path is not None:
                 return [neighbor_x, *path]
         else:
             return None
 
-    def find_discriminating_path_to_triplet(self, node_a, node_b, node_c, nodes_set=None):
+    def find_discriminating_path_to_triplet(
+        self, node_a, node_b, node_c, nodes_set=None
+    ):
         """
         Find a discriminating path from some node (denoted D) to node C for node B.
         That is, D *--> ? <--> ... <--> A <--* B *--* C
@@ -356,20 +465,29 @@ class PAG(MixedGraph):
 
         # assumed: A <--* B *--* C or a path from A to B with all colliders & parents of C; and A ---> C,
         # we need to find D such that D *--> A, D and C are disjoint
-        d_nodes = (self._graph[node_a][Mark.Directed] - {node_a, node_b, node_c}) & nodes_set
+        d_nodes = (
+            self._graph[node_a][Mark.Directed] - {node_a, node_b, node_c}
+        ) & nodes_set
         new_a_nodes = set()
         for node_d in d_nodes:
-            if not self.is_connected(node_d, node_c):  # found a discriminating path from D to C for B, (D, A, B, C)
+            if not self.is_connected(
+                node_d, node_c
+            ):  # found a discriminating path from D to C for B, (D, A, B, C)
                 return node_d  # the source of the path
             else:
                 # if D ---> C and D <--> A, then D becomes the "A" node in the new search triplet
-                if self.is_parent(node_d, node_c) and node_a in self._graph[node_d][Mark.Directed]:
+                if (
+                    self.is_parent(node_d, node_c)
+                    and node_a in self._graph[node_d][Mark.Directed]
+                ):
                     new_a_nodes.add(node_d)
 
         # didn't find a minimal discriminating path (containing three edges). Search with the new "A" nodes
         # we have D nodes that are part of the path D *--> A <--* B *--* C and D ---> C and A ---> C
         for new_node_a in new_a_nodes:
-            node_d = self.find_discriminating_path_to_triplet(new_node_a, node_b, node_c, nodes_set - {new_node_a})
+            node_d = self.find_discriminating_path_to_triplet(
+                new_node_a, node_b, node_c, nodes_set - {new_node_a}
+            )
             if node_d is not None:
                 return node_d
 
@@ -388,7 +506,9 @@ class PAG(MixedGraph):
 
         # (exit condition of the recursion)
         # test if the target is in the neighborhood
-        neighbors = self.find_adjacent_nodes(source_node, en_nodes)  # find the neighbors from the en_nodes set
+        neighbors = self.find_adjacent_nodes(
+            source_node, en_nodes
+        )  # find the neighbors from the en_nodes set
         if target_node in neighbors:
             return True
 
@@ -403,7 +523,7 @@ class PAG(MixedGraph):
             return False
 
     def is_possible_ancestor(self, ancestor_node, descendant_node, en_nodes=None):
-        '''
+        """
         Test if one node is a possible ancestor of second node.
         This relation is true if there is a path <node_1, X(0), X(1), ..., X(n), node_2> such that for i=1,...,n-1,
         X(i) is a possible parent of X(i+1). Recall that X(i) is a possible parent of X(i+1) if on the edge between them
@@ -412,7 +532,7 @@ class PAG(MixedGraph):
         :param descendant_node:
         :param en_nodes: considers paths that are consisted of these nodes. That is, a sug-graph is considered.
         :return: True if the relation exists in the graph; otherwise, False
-        '''
+        """
         if en_nodes is None:
             en_nodes = self.nodes_set
 
@@ -442,8 +562,9 @@ class PAG(MixedGraph):
             ex_nodes = self.nodes_set - nodes_set
 
         for node in nodes_set:
-            if (not self._graph[node][Mark.Tail].isdisjoint(ex_nodes)) or \
-                    (not self._graph[node][Mark.Circle].isdisjoint(ex_nodes)):
+            if (not self._graph[node][Mark.Tail].isdisjoint(ex_nodes)) or (
+                not self._graph[node][Mark.Circle].isdisjoint(ex_nodes)
+            ):
                 return False
         else:
             return True
@@ -471,15 +592,23 @@ class PAG(MixedGraph):
         :return: set of possible ancestors (including the input nodes set)
         """
         # Todo: implement more efficiently
-        assert isinstance(descendants_set, (list, tuple, set))  # make sure a set is received and not a single element
+        assert isinstance(
+            descendants_set, (list, tuple, set)
+        )  # make sure a set is received and not a single element
         if en_nodes is None:
             en_nodes = self.nodes_set
 
         ancestors = set(descendants_set)
         for node in descendants_set:  # find all possible ancestors for node
             candidates = en_nodes - ancestors
-            for pos_ancestor in candidates:  # search possible ancestors from the nodes that weren't already identified
-                if self.is_possible_ancestor(ancestor_node=pos_ancestor, descendant_node=node, en_nodes=en_nodes):
+            for (
+                pos_ancestor
+            ) in (
+                candidates
+            ):  # search possible ancestors from the nodes that weren't already identified
+                if self.is_possible_ancestor(
+                    ancestor_node=pos_ancestor, descendant_node=node, en_nodes=en_nodes
+                ):
                     ancestors.add(pos_ancestor)
         return ancestors
 
@@ -511,17 +640,31 @@ class PAG(MixedGraph):
             anterior_set.update(self.find_possible_ancestors({node_z}))
 
         # 2. In an empty undirected graph connect every pair of nodes that are collider-connected
-        moral_graph = self.get_skeleton_graph(anterior_set)  # 2.a. initialize a moral graph using the graph skeleton
-        components_list = self.find_definite_c_components(anterior_set)  # 2.b. find dc-components
-        for dc_comp in components_list:  # 2.c. augment each dc-component by adding nodes that have incoming edges
+        moral_graph = self.get_skeleton_graph(
+            anterior_set
+        )  # 2.a. initialize a moral graph using the graph skeleton
+        components_list = self.find_definite_c_components(
+            anterior_set
+        )  # 2.b. find dc-components
+        for (
+            dc_comp
+        ) in (
+            components_list
+        ):  # 2.c. augment each dc-component by adding nodes that have incoming edges
             augmented_nodes = set()
             for dc_node in dc_comp:
-                augmented_nodes.update(filter(
-                    lambda node: node in self._graph[dc_node][Mark.Directed],
-                    anterior_set - dc_comp
-                ))
+                augmented_nodes.update(
+                    filter(
+                        lambda node: node in self._graph[dc_node][Mark.Directed],
+                        anterior_set - dc_comp,
+                    )
+                )
             dc_comp.update(augmented_nodes)
-        for component in components_list:  # 2.c. connect pair of nodes that are within the same augmented-dc-component
+        for (
+            component
+        ) in (
+            components_list
+        ):  # 2.c. connect pair of nodes that are within the same augmented-dc-component
             for node_i, node_j in combinations(component, 2):
                 moral_graph.add_edge(node_i, node_j)
 
@@ -540,10 +683,14 @@ class PAG(MixedGraph):
         if en_nodes is None:
             en_nodes = self.nodes_set
 
-        dc_components = self.find_unconnected_subgraphs(en_nodes, sym_edge_mark=Mark.Directed)
+        dc_components = self.find_unconnected_subgraphs(
+            en_nodes, sym_edge_mark=Mark.Directed
+        )
         return dc_components
 
-    def find_union_pc_components_for_node(self, node_x, en_nodes=None, dc_components=None) -> set:
+    def find_union_pc_components_for_node(
+        self, node_x, en_nodes=None, dc_components=None
+    ) -> set:
         """
         Given node, X, find all the nodes that are in some possible c-component (pc-component) with X.
         See "A Graphical Criterion for Effect Identification in Equivalence Classes of Causal Diagrams",
@@ -568,35 +715,52 @@ class PAG(MixedGraph):
         :param dc_components: optional. if not provided, it is calculated each time this method is called
         :return: a set of nodes that are in the same pc-component with node_x
         """
-        assert self.visible_edges is not None  # need to call self.find_visible_edges() first
+        assert (
+            self.visible_edges is not None
+        )  # need to call self.find_visible_edges() first
 
         if en_nodes is None:  # is a sub-graph defined? if not, use the entire graph
             en_nodes = self.nodes_set
 
         # 1. Find invisible neighbors of x: X *--* neighbor, such that the edge is not marked visible
-        invisible_neighbors = set(filter(
-            lambda neighbor: (not self.is_edge_visible(parent=node_x, child=neighbor) and
-                              not self.is_edge_visible(parent=neighbor, child=node_x)),
-            self.find_adjacent_nodes(node_x, pool_nodes=en_nodes)  # all the neighbors of node X
-        ))
+        invisible_neighbors = set(
+            filter(
+                lambda neighbor: (
+                    not self.is_edge_visible(parent=node_x, child=neighbor)
+                    and not self.is_edge_visible(parent=neighbor, child=node_x)
+                ),
+                self.find_adjacent_nodes(
+                    node_x, pool_nodes=en_nodes
+                ),  # all the neighbors of node X
+            )
+        )
 
         # 2. Find invisible children of X: X * --> Y, where the edge is not visible
-        invisible_children = set(filter(
-            lambda node_y_test: node_x in self._graph[node_y_test][Mark.Directed],  # X *--> Y (Y should be a collider)
-            invisible_neighbors
-        ))
+        invisible_children = set(
+            filter(
+                lambda node_y_test: node_x
+                in self._graph[node_y_test][
+                    Mark.Directed
+                ],  # X *--> Y (Y should be a collider)
+                invisible_neighbors,
+            )
+        )
         pc_component = set()
         pc_component.update(invisible_children)
 
         # 3. For each invisible_child, Y, find the dc-component
-        nodes_valid_dc = set()  # Z nodes. Nodes that are connected by bi-directed edges to invisible children of X
+        nodes_valid_dc = (
+            set()
+        )  # Z nodes. Nodes that are connected by bi-directed edges to invisible children of X
         # Todo: accept global dc-components and modify (possibly split) its components that include exogenous nodes)
         # find dc-components (nodes connected by di-directed edges in the sub-graph)
         if dc_components is None:
             dc_components = self.find_definite_c_components(en_nodes)
         for node_y in invisible_children:
             for dc_comp in dc_components:
-                if node_y in dc_comp:  # found a dc-component of node_y, add it to the pc-component of X
+                if (
+                    node_y in dc_comp
+                ):  # found a dc-component of node_y, add it to the pc-component of X
                     nodes_valid_dc.update(dc_comp)
                     break  # a node cannot appear in more than one dc-component
 
@@ -604,14 +768,20 @@ class PAG(MixedGraph):
 
         # 4. For each node in the dc-component, Z, find nodes, W, such that Z <--* W
         nodes_valid_dc.discard(node_x)
-        remaining_nodes = en_nodes - pc_component  # nodes that are not in the updated pc-component
+        remaining_nodes = (
+            en_nodes - pc_component
+        )  # nodes that are not in the updated pc-component
         invisible_parents = set()
         for node_z in nodes_valid_dc:
-            invisible_parents.update(filter(
-                lambda node_w: (node_w in self._graph[node_z][Mark.Directed] and  # Z <--* W
-                                not self.is_edge_visible(node_w, node_y)),  # the edge should not be visible
-                remaining_nodes
-            ))
+            invisible_parents.update(
+                filter(
+                    lambda node_w: (
+                        node_w in self._graph[node_z][Mark.Directed]
+                        and not self.is_edge_visible(node_w, node_y)  # Z <--* W
+                    ),  # the edge should not be visible
+                    remaining_nodes,
+                )
+            )
         pc_component.update(invisible_parents)
         pc_component.update(invisible_neighbors)
         pc_component.add(node_x)
@@ -635,7 +805,9 @@ class PAG(MixedGraph):
         pc_component = set()
         for node_x in set_x:
             pc_component.update(
-                self.find_union_pc_components_for_node(node_x=node_x, en_nodes=en_nodes, dc_components=dc_components)
+                self.find_union_pc_components_for_node(
+                    node_x=node_x, en_nodes=en_nodes, dc_components=dc_components
+                )
             )
         return pc_component
 
@@ -665,7 +837,9 @@ class PAG(MixedGraph):
         :param en_nodes: set of nodes defining the graph
         :return: a list of buckets (not in topological order)
         """
-        buckets_list = self.find_unconnected_subgraphs(en_nodes=en_nodes, sym_edge_mark=Mark.Circle)
+        buckets_list = self.find_unconnected_subgraphs(
+            en_nodes=en_nodes, sym_edge_mark=Mark.Circle
+        )
         return buckets_list
 
     def get_ordered_buckets(self, en_nodes=None) -> list:
@@ -679,20 +853,26 @@ class PAG(MixedGraph):
         if en_nodes is None:
             en_nodes = self.nodes_set
 
-        buckets_list = self.find_buckets_list(en_nodes=en_nodes)  # unordered list of buckets (circle components)
+        buckets_list = self.find_buckets_list(
+            en_nodes=en_nodes
+        )  # unordered list of buckets (circle components)
         ordered_buckets = []
-        remaining_nodes = {node for bucket in buckets_list for node in bucket}  # nodes of buckets that need sorting
+        remaining_nodes = {
+            node for bucket in buckets_list for node in bucket
+        }  # nodes of buckets that need sorting
         while len(buckets_list) > 0:
             idx = 0
             while idx < len(buckets_list):
                 bucket = buckets_list[idx]
-                if self.is_set_possible_sink(bucket, ex_nodes=remaining_nodes-bucket):
+                if self.is_set_possible_sink(bucket, ex_nodes=remaining_nodes - bucket):
                     bucket = buckets_list.pop(idx)
                     ordered_buckets.append(bucket)
                     remaining_nodes = remaining_nodes - bucket
                     break
                 idx += 1
-            if len(ordered_buckets) == 0:  # no initial bucket with lowest topological order (sink) was found
+            if (
+                len(ordered_buckets) == 0
+            ):  # no initial bucket with lowest topological order (sink) was found
                 assert len(ordered_buckets) > 0
 
         ordered_buckets.reverse()
@@ -726,15 +906,23 @@ class PAG(MixedGraph):
         # check each node if it can serve as a collider for a disjoint neighbors
         for node_z in self.nodes_set:
             # check neighbors
-            xy_nodes = self.find_adjacent_nodes(node_z)  # neighbors with some edge-mark at node_z
+            xy_nodes = self.find_adjacent_nodes(
+                node_z
+            )  # neighbors with some edge-mark at node_z
             for node_x, node_y in combinations(xy_nodes, 2):
                 if self.is_connected(node_x, node_y):
                     continue  # skip this pair as they are connected
                 if node_z not in sepsets.get_sepset(node_x, node_y):
                     self.replace_edge_mark(
-                        node_source=node_x, node_target=node_z, requested_edge_mark=Mark.Directed)  # orient X *--> Z
+                        node_source=node_x,
+                        node_target=node_z,
+                        requested_edge_mark=Mark.Directed,
+                    )  # orient X *--> Z
                     self.replace_edge_mark(
-                        node_source=node_y, node_target=node_z, requested_edge_mark=Mark.Directed)  # orient Y *--> Z
+                        node_source=node_y,
+                        node_target=node_z,
+                        requested_edge_mark=Mark.Directed,
+                    )  # orient Y *--> Z
 
     def maximally_orient_pattern(self, rules_set=None):
         """
@@ -765,10 +953,16 @@ class PAG(MixedGraph):
             for node_a in a_nodes:
                 for node_c in c_nodes:
                     if not self.is_connected(node_a, node_c):
-                        self.replace_edge_mark(node_source=node_c, node_target=node_b,
-                                               requested_edge_mark=Mark.Tail)  # tail edge-mark
-                        self.replace_edge_mark(node_source=node_b, node_target=node_c,
-                                               requested_edge_mark=Mark.Directed)  # head edge-mark
+                        self.replace_edge_mark(
+                            node_source=node_c,
+                            node_target=node_b,
+                            requested_edge_mark=Mark.Tail,
+                        )  # tail edge-mark
+                        self.replace_edge_mark(
+                            node_source=node_b,
+                            node_target=node_c,
+                            requested_edge_mark=Mark.Directed,
+                        )  # head edge-mark
                         graph_modified = True
 
         return graph_modified
@@ -784,16 +978,23 @@ class PAG(MixedGraph):
         # case (1): If A *--> B ---> C and A *--o C, then orient A *--> C
         for node_b in self.nodes_set:
             a_nodes = self._graph[node_b][Mark.Directed]  # A *--> B
-            c_nodes = self._graph[node_b][Mark.Tail]  # B ---* C (we still need to check that B ---> C)
+            c_nodes = self._graph[node_b][
+                Mark.Tail
+            ]  # B ---* C (we still need to check that B ---> C)
 
             for node_c in c_nodes:
-                if node_b not in self._graph[node_c][Mark.Directed]:  # check if B *--> C (already is B ---* C)
+                if (
+                    node_b not in self._graph[node_c][Mark.Directed]
+                ):  # check if B *--> C (already is B ---* C)
                     continue  # skip this node_c
                 # now we are sure that B ---> C
                 for node_a in a_nodes:
                     if node_a in self._graph[node_c][Mark.Circle]:  # if A *--o C
-                        self.replace_edge_mark(node_source=node_a, node_target=node_c,
-                                               requested_edge_mark=Mark.Directed)
+                        self.replace_edge_mark(
+                            node_source=node_a,
+                            node_target=node_c,
+                            requested_edge_mark=Mark.Directed,
+                        )
                         graph_modified = True
 
         # case (2): If A ---> B *--> C, and A *--o C, then orient A *--> C
@@ -801,13 +1002,20 @@ class PAG(MixedGraph):
             b_nodes = self._graph[node_c][Mark.Directed].copy()  # B *--> C
 
             for node_b in b_nodes:
-                a_nodes = self._graph[node_b][Mark.Directed]  # A *--> B (we still need to check A ---> B)
+                a_nodes = self._graph[node_b][
+                    Mark.Directed
+                ]  # A *--> B (we still need to check A ---> B)
                 for node_a in a_nodes:
-                    if node_b not in self._graph[node_a][Mark.Tail]:  # check if A ---* B (already is A *--> B)
+                    if (
+                        node_b not in self._graph[node_a][Mark.Tail]
+                    ):  # check if A ---* B (already is A *--> B)
                         continue  # skip this node_x
                     if node_a in self._graph[node_c][Mark.Circle]:  # if A *--o C
-                        self.replace_edge_mark(node_source=node_a, node_target=node_c,
-                                               requested_edge_mark=Mark.Directed)
+                        self.replace_edge_mark(
+                            node_source=node_a,
+                            node_target=node_c,
+                            requested_edge_mark=Mark.Directed,
+                        )
                         graph_modified = True
 
         return graph_modified
@@ -823,11 +1031,19 @@ class PAG(MixedGraph):
             d_nodes = self._graph[node_b][Mark.Circle].copy()  # D *--o B
             for node_d in d_nodes:
                 # find pairs that satisfy (A, C) *--> B and (A, C) *--o D
-                ac_nodes = self._graph[node_b][Mark.Directed] & self._graph[node_d][Mark.Circle]
-                for (node_a, node_c) in combinations(ac_nodes, 2):
-                    if not self.is_connected(node_a, node_c):  # a pair (A,C) exists and is disjoint
-                        self.replace_edge_mark(node_source=node_d, node_target=node_b,
-                                               requested_edge_mark=Mark.Directed)
+                ac_nodes = (
+                    self._graph[node_b][Mark.Directed]
+                    & self._graph[node_d][Mark.Circle]
+                )
+                for node_a, node_c in combinations(ac_nodes, 2):
+                    if not self.is_connected(
+                        node_a, node_c
+                    ):  # a pair (A,C) exists and is disjoint
+                        self.replace_edge_mark(
+                            node_source=node_d,
+                            node_target=node_b,
+                            requested_edge_mark=Mark.Directed,
+                        )
                         graph_modified = True
 
         return graph_modified
@@ -844,29 +1060,53 @@ class PAG(MixedGraph):
         for node_b in self.nodes_set:
             c_nodes = self._graph[node_b][Mark.Circle].copy()  # B o--* C
             for node_c in c_nodes:
-                potential_a_nodes = self.find_parents(node_c)  # should comply with A ---> C
+                potential_a_nodes = self.find_parents(
+                    node_c
+                )  # should comply with A ---> C
                 for node_a in potential_a_nodes:
-                    if node_b in self._graph[node_a][Mark.Directed]:  # should comply with A <--* B
+                    if (
+                        node_b in self._graph[node_a][Mark.Directed]
+                    ):  # should comply with A <--* B
                         # node_x is legal
-                        node_d = self.find_discriminating_path_to_triplet(node_a, node_b, node_c)
+                        node_d = self.find_discriminating_path_to_triplet(
+                            node_a, node_b, node_c
+                        )
                         if node_d is not None:
                             # found a discriminating path
                             if node_b in self.sepset.get_sepset(node_d, node_c):
                                 # orient B o--* C into B ---> C
-                                self.replace_edge_mark(node_source=node_b, node_target=node_c,
-                                                       requested_edge_mark=Mark.Directed)
-                                self.replace_edge_mark(node_source=node_c, node_target=node_b,
-                                                       requested_edge_mark=Mark.Tail)
+                                self.replace_edge_mark(
+                                    node_source=node_b,
+                                    node_target=node_c,
+                                    requested_edge_mark=Mark.Directed,
+                                )
+                                self.replace_edge_mark(
+                                    node_source=node_c,
+                                    node_target=node_b,
+                                    requested_edge_mark=Mark.Tail,
+                                )
                             else:
                                 # orient A <--> B <--> C
-                                self.replace_edge_mark(node_source=node_b, node_target=node_a,
-                                                       requested_edge_mark=Mark.Directed)
-                                self.replace_edge_mark(node_source=node_a, node_target=node_b,
-                                                       requested_edge_mark=Mark.Directed)
-                                self.replace_edge_mark(node_source=node_b, node_target=node_c,
-                                                       requested_edge_mark=Mark.Directed)
-                                self.replace_edge_mark(node_source=node_c, node_target=node_b,
-                                                       requested_edge_mark=Mark.Directed)
+                                self.replace_edge_mark(
+                                    node_source=node_b,
+                                    node_target=node_a,
+                                    requested_edge_mark=Mark.Directed,
+                                )
+                                self.replace_edge_mark(
+                                    node_source=node_a,
+                                    node_target=node_b,
+                                    requested_edge_mark=Mark.Directed,
+                                )
+                                self.replace_edge_mark(
+                                    node_source=node_b,
+                                    node_target=node_c,
+                                    requested_edge_mark=Mark.Directed,
+                                )
+                                self.replace_edge_mark(
+                                    node_source=node_c,
+                                    node_target=node_b,
+                                    requested_edge_mark=Mark.Directed,
+                                )
 
                             graph_modified = True
 
@@ -883,33 +1123,56 @@ class PAG(MixedGraph):
         graph_modified = False
 
         # create a list of all the A o--o B edges in the graph
-        var_edges_list = [(node_a, node_b)
-                          for node_a in self.nodes_set
-                          for node_b in self.nodes_set
-                          if self.is_edge(node_a, node_b, Mark.Circle, Mark.Circle)]
+        var_edges_list = [
+            (node_a, node_b)
+            for node_a in self.nodes_set
+            for node_b in self.nodes_set
+            if self.is_edge(node_a, node_b, Mark.Circle, Mark.Circle)
+        ]
 
         # examine each variant edge
-        for (node_a, node_b) in var_edges_list:
-            a_neighbors_list = {nb_a for nb_a in self.nodes_set - {node_a, node_b}
-                                if self.is_edge(node_a, nb_a, Mark.Circle, Mark.Circle)  # node_x o--o nb_a
-                                and not self.is_connected(node_b, nb_a)}  # nb_a not connected to node_y
-            b_neighbors_list = {nb_b for nb_b in self.nodes_set - {node_a, node_b}
-                                if self.is_edge(node_b, nb_b, Mark.Circle, Mark.Circle)  # node_y o--o nb_b
-                                and not self.is_connected(node_a, nb_b)}  # nb_b not connected to node_x
+        for node_a, node_b in var_edges_list:
+            a_neighbors_list = {
+                nb_a
+                for nb_a in self.nodes_set - {node_a, node_b}
+                if self.is_edge(
+                    node_a, nb_a, Mark.Circle, Mark.Circle
+                )  # node_x o--o nb_a
+                and not self.is_connected(node_b, nb_a)
+            }  # nb_a not connected to node_y
+            b_neighbors_list = {
+                nb_b
+                for nb_b in self.nodes_set - {node_a, node_b}
+                if self.is_edge(
+                    node_b, nb_b, Mark.Circle, Mark.Circle
+                )  # node_y o--o nb_b
+                and not self.is_connected(node_a, nb_b)
+            }  # nb_b not connected to node_x
 
             for neighbor_a in a_neighbors_list:
                 for neighbor_b in b_neighbors_list:
-                    uncov_circ_path = \
-                        self.find_uncovered_path(node_a, node_b,
-                                                 neighbor_x=neighbor_a, neighbor_y=neighbor_b, edge_condition=
-                                                 lambda in1, in2: self.is_edge(in1, in2, Mark.Circle, Mark.Circle))
+                    uncov_circ_path = self.find_uncovered_path(
+                        node_a,
+                        node_b,
+                        neighbor_x=neighbor_a,
+                        neighbor_y=neighbor_b,
+                        edge_condition=lambda in1, in2: self.is_edge(
+                            in1, in2, Mark.Circle, Mark.Circle
+                        ),
+                    )
                     if uncov_circ_path is not None:
                         # criterion is met
                         graph_modified = True
                         self.reset_orientations(Mark.Tail, {node_a, node_b})
-                        full_path = [node_a, *uncov_circ_path, node_b]  # add the end-points, A and B, to the path
-                        for idx in range(len(full_path)-1):
-                            self.reset_orientations(Mark.Tail, {full_path[idx], full_path[idx+1]})
+                        full_path = [
+                            node_a,
+                            *uncov_circ_path,
+                            node_b,
+                        ]  # add the end-points, A and B, to the path
+                        for idx in range(len(full_path) - 1):
+                            self.reset_orientations(
+                                Mark.Tail, {full_path[idx], full_path[idx + 1]}
+                            )
 
         return graph_modified
 
@@ -921,13 +1184,19 @@ class PAG(MixedGraph):
         """
         graph_modified = False
         for node_b in self.nodes_set:
-            a_nodes = {can_node for can_node in self._graph[node_b][Mark.Tail]
-                       if node_b in self._graph[can_node][Mark.Tail]}  # A ---- B
+            a_nodes = {
+                can_node
+                for can_node in self._graph[node_b][Mark.Tail]
+                if node_b in self._graph[can_node][Mark.Tail]
+            }  # A ---- B
             c_nodes = self._graph[node_b][Mark.Circle].copy()  # B o--* C
             for node_a in a_nodes:
                 for node_c in c_nodes:
-                    self.replace_edge_mark(node_source=node_c, node_target=node_b,
-                                           requested_edge_mark=Mark.Tail)  # tail edge-mark
+                    self.replace_edge_mark(
+                        node_source=node_c,
+                        node_target=node_b,
+                        requested_edge_mark=Mark.Tail,
+                    )  # tail edge-mark
                     graph_modified = True
 
         return graph_modified
@@ -940,16 +1209,22 @@ class PAG(MixedGraph):
         """
         graph_modified = False
         for node_b in self.nodes_set:
-            a_nodes = {can_node for can_node in self._graph[node_b][Mark.Circle]
-                       if node_b in self._graph[can_node][Mark.Tail]}  # A ---o B
+            a_nodes = {
+                can_node
+                for can_node in self._graph[node_b][Mark.Circle]
+                if node_b in self._graph[can_node][Mark.Tail]
+            }  # A ---o B
             c_nodes = self._graph[node_b][Mark.Circle].copy()  # B o--* C
             for node_a in a_nodes:
                 for node_c in c_nodes:
                     if node_a == node_c:
                         continue
                     if not self.is_connected(node_a, node_c):
-                        self.replace_edge_mark(node_source=node_c, node_target=node_b,
-                                               requested_edge_mark=Mark.Tail)  # tail edge-mark
+                        self.replace_edge_mark(
+                            node_source=node_c,
+                            node_target=node_b,
+                            requested_edge_mark=Mark.Tail,
+                        )  # tail edge-mark
                         graph_modified = True
 
         return graph_modified
@@ -963,15 +1238,27 @@ class PAG(MixedGraph):
         """
         graph_modified = False
         for node_b in self.nodes_set:
-            a_nodes = {can_node for can_node in self._graph[node_b][Mark.Directed] | self._graph[node_b][Mark.Circle]
-                       if node_b in self._graph[can_node][Mark.Tail]}  # A ---> B or A ---o B
-            c_nodes = {can_node for can_node in self._graph[node_b][Mark.Tail]
-                       if node_b in self._graph[can_node][Mark.Directed]}  # B ---> C
+            a_nodes = {
+                can_node
+                for can_node in self._graph[node_b][Mark.Directed]
+                | self._graph[node_b][Mark.Circle]
+                if node_b in self._graph[can_node][Mark.Tail]
+            }  # A ---> B or A ---o B
+            c_nodes = {
+                can_node
+                for can_node in self._graph[node_b][Mark.Tail]
+                if node_b in self._graph[can_node][Mark.Directed]
+            }  # B ---> C
             for node_a in a_nodes:
                 for node_c in c_nodes:
-                    if self.is_edge(node_a, node_c, Mark.Circle, Mark.Directed):  # A o--> C
-                        self.replace_edge_mark(node_source=node_c, node_target=node_a,
-                                               requested_edge_mark=Mark.Tail)  # tail edge-mark at A
+                    if self.is_edge(
+                        node_a, node_c, Mark.Circle, Mark.Directed
+                    ):  # A o--> C
+                        self.replace_edge_mark(
+                            node_source=node_c,
+                            node_target=node_a,
+                            requested_edge_mark=Mark.Tail,
+                        )  # tail edge-mark at A
                         graph_modified = True
 
         return graph_modified
@@ -985,23 +1272,40 @@ class PAG(MixedGraph):
         """
         graph_modified = False
         for node_a in self.nodes_set:
-            c_nodes = {can_node for can_node in self._graph[node_a][Mark.Circle]
-                       if node_a in self._graph[can_node][Mark.Directed]}  # A o--> C
+            c_nodes = {
+                can_node
+                for can_node in self._graph[node_a][Mark.Circle]
+                if node_a in self._graph[can_node][Mark.Directed]
+            }  # A o--> C
             for node_c in c_nodes:
                 # look for a possibly directed uncovered path s.t. B and C are not connected (for the given A o--> C
-                b_nodes = {can_b for can_b in self.find_possible_children(node_a, self.nodes_set - {node_c, node_a})
-                           if not self.is_connected(can_b, node_c)}
+                b_nodes = {
+                    can_b
+                    for can_b in self.find_possible_children(
+                        node_a, self.nodes_set - {node_c, node_a}
+                    )
+                    if not self.is_connected(can_b, node_c)
+                }
 
                 for node_b in b_nodes:
-                    d_nodes = self.find_possible_parents(node_c, self.nodes_set - {node_a, node_b, node_c})
+                    d_nodes = self.find_possible_parents(
+                        node_c, self.nodes_set - {node_a, node_b, node_c}
+                    )
                     # search a p.d. uncovered path for <A, B, ..., C>
                     for node_d in d_nodes:
-                        pd_path = self.find_uncovered_path(node_x=node_a, node_y=node_c,
-                                                           neighbor_x=node_b, neighbor_y=node_d,
-                                                           edge_condition=self.is_possible_parent)
+                        pd_path = self.find_uncovered_path(
+                            node_x=node_a,
+                            node_y=node_c,
+                            neighbor_x=node_b,
+                            neighbor_y=node_d,
+                            edge_condition=self.is_possible_parent,
+                        )
                         if pd_path is not None:
-                            self.replace_edge_mark(node_source=node_c, node_target=node_a,
-                                                   requested_edge_mark=Mark.Tail)  # tail edge-mark at A
+                            self.replace_edge_mark(
+                                node_source=node_c,
+                                node_target=node_a,
+                                requested_edge_mark=Mark.Tail,
+                            )  # tail edge-mark at A
                             graph_modified = True
                             return graph_modified
 
@@ -1018,18 +1322,27 @@ class PAG(MixedGraph):
         graph_modified = False
 
         for node_c in self.nodes_set:
-            a_nodes = {can_node for can_node in self.nodes_set - {node_c}
-                       if self.is_edge(can_node, node_c, Mark.Circle, Mark.Directed)}  # find A o--> C
+            a_nodes = {
+                can_node
+                for can_node in self.nodes_set - {node_c}
+                if self.is_edge(can_node, node_c, Mark.Circle, Mark.Directed)
+            }  # find A o--> C
             if len(a_nodes) == 0:
                 continue  # no A o--> was found for the specific C node, go to the next c_node
             # find B, D such that B ---> C <---D (directed edges)
-            bd_nodes = {can_node for can_node in self.nodes_set - {node_c}
-                        if self.is_edge(can_node, node_c, Mark.Tail, Mark.Directed)}  # find a pair {D,B} ---> C
+            bd_nodes = {
+                can_node
+                for can_node in self.nodes_set - {node_c}
+                if self.is_edge(can_node, node_c, Mark.Tail, Mark.Directed)
+            }  # find a pair {D,B} ---> C
             if len(bd_nodes) < 2:
                 continue
-            for node_a in a_nodes:  # try to orient the tail of this specific A o--> C edge
+            for (
+                node_a
+            ) in a_nodes:  # try to orient the tail of this specific A o--> C edge
                 a_possible_children = self.find_possible_children(
-                    parent_node=node_a, en_nodes=self.nodes_set - {node_a, node_c})  # find A o--{o,>} neighbors
+                    parent_node=node_a, en_nodes=self.nodes_set - {node_a, node_c}
+                )  # find A o--{o,>} neighbors
                 if len(a_possible_children) < 2:
                     continue  # cannot draw two paths out of A so go to the next A-node
 
@@ -1042,14 +1355,25 @@ class PAG(MixedGraph):
                             if node_e == node_f or self.is_connected(node_e, node_f):
                                 continue
 
-                            path_e = self.find_uncovered_path(node_x=node_a, node_y=node_c,
-                                                              neighbor_x=node_e, neighbor_y=node_b)
+                            path_e = self.find_uncovered_path(
+                                node_x=node_a,
+                                node_y=node_c,
+                                neighbor_x=node_e,
+                                neighbor_y=node_b,
+                            )
                             if path_e is not None:
-                                path_f = self.find_uncovered_path(node_x=node_a, node_y=node_c,
-                                                                  neighbor_x=node_f, neighbor_y=node_d)
+                                path_f = self.find_uncovered_path(
+                                    node_x=node_a,
+                                    node_y=node_c,
+                                    neighbor_x=node_f,
+                                    neighbor_y=node_d,
+                                )
                                 if path_f is not None:
-                                    self.replace_edge_mark(node_source=node_c, node_target=node_a,
-                                                           requested_edge_mark=Mark.Tail)  # tail edge-mark at A
+                                    self.replace_edge_mark(
+                                        node_source=node_c,
+                                        node_target=node_a,
+                                        requested_edge_mark=Mark.Tail,
+                                    )  # tail edge-mark at A
                                     graph_modified = True
                                     return graph_modified
 

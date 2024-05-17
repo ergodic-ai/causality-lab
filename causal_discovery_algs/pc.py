@@ -1,5 +1,9 @@
 from itertools import combinations, chain
-from causal_discovery_utils.constraint_based import LearnStructBase, unique_element_iterator
+from operator import methodcaller
+from causal_discovery_utils.constraint_based import (
+    LearnStructBase,
+    unique_element_iterator,
+)
 from graphical_models import PDAG
 
 
@@ -7,7 +11,9 @@ class LearnStructPC(LearnStructBase):
     def __init__(self, nodes_set, ci_test):
         super().__init__(PDAG, nodes_set=nodes_set, ci_test=ci_test)
         self.graph.create_complete_graph(nodes_set)  # Create a fully connected graph
-        self.overwrite_starting_graph = True  # if True, the sequence at which the CIs are tested affects the result
+        self.overwrite_starting_graph = (
+            True  # if True, the sequence at which the CIs are tested affects the result
+        )
 
     def learn_structure(self):
         """
@@ -28,18 +34,28 @@ class LearnStructPC(LearnStructBase):
         :return: True if exit condition is met
         """
         for node in self.graph.nodes_set:
-            if self.graph.fan_in(node) > order:  # if a node have a large enough number of parents, exit cond. is false
+            if (
+                self.graph.fan_in(node) > order
+            ):  # if a node have a large enough number of parents, exit cond. is false
                 return False
         else:
             return True  # didn't find a node with a large enough number of parents for CI test, so exit
 
-    def learn_skeleton(self):
+    def learn_skeleton(self, logger=None):
         cond_indep = self.ci_test.cond_indep
 
+        verbose = False
+        if logger is not None:
+            verbose = True
+
         if self.overwrite_starting_graph:
-            source_cpdag = self.graph  # Not a copy!!! thus, edge deletions affect consequent CI queries
+            source_cpdag = (
+                self.graph
+            )  # Not a copy!!! thus, edge deletions affect consequent CI queries
         else:
-            source_cpdag = self.graph.copy()  # slower, but removes the dependence on the sequence of CI testing
+            source_cpdag = (
+                self.graph.copy()
+            )  # slower, but removes the dependence on the sequence of CI testing
 
         cond_set_size = 0
         while not self._exit_cond(cond_set_size):
@@ -52,12 +68,25 @@ class LearnStructPC(LearnStructBase):
                 cond_sets_i = combinations(pot_parents_i, cond_set_size)
                 cond_sets_j = combinations(pot_parents_j, cond_set_size)
                 cond_sets = unique_element_iterator(  # unique of
-                    chain(cond_sets_i, cond_sets_j)  # neighbors of node_i OR neighbors of node_j
+                    chain(
+                        cond_sets_i, cond_sets_j
+                    )  # neighbors of node_i OR neighbors of node_j
                 )
 
                 for cond_set in cond_sets:
                     if cond_indep(node_i, node_j, cond_set):
-                        self.graph.delete_edge(node_i, node_j)  # remove directed/undirected edge
+                        if verbose and logger is not None:
+                            logger.log(
+                                "Removing",
+                                metadata={
+                                    "node_i": node_i,
+                                    "node_j": node_j,
+                                    "cond_set": list(cond_set),
+                                },
+                            )
+                        self.graph.delete_edge(
+                            node_i, node_j
+                        )  # remove directed/undirected edge
                         self.sepset.set_sepset(node_i, node_j, cond_set)
                         break  # stop searching for independence as we found one and updated the graph accordingly
 
@@ -68,7 +97,9 @@ class LearnStructPC(LearnStructBase):
         # create a copy of edges
         pre_neighbors = dict()
         for node in self.graph.nodes_set:
-            pre_neighbors[node] = self.graph.undirected_neighbors(node).copy()  # undirected neighbors pre graph changes
+            pre_neighbors[node] = self.graph.undirected_neighbors(
+                node
+            ).copy()  # undirected neighbors pre graph changes
 
         # check each node if it can serve as new collider for a disjoint neighbors
         for node_z in self.graph.nodes_set:
@@ -78,5 +109,9 @@ class LearnStructPC(LearnStructBase):
                 if self.graph.is_connected(node_x, node_y):
                     continue  # skip this pair as they are connected
                 if node_z not in self.sepset.get_sepset(node_x, node_y):
-                    self.graph.orient_edge(source_node=node_x, target_node=node_z)  # orient X --> Z
-                    self.graph.orient_edge(source_node=node_y, target_node=node_z)  # orient Y --> Z
+                    self.graph.orient_edge(
+                        source_node=node_x, target_node=node_z
+                    )  # orient X --> Z
+                    self.graph.orient_edge(
+                        source_node=node_y, target_node=node_z
+                    )  # orient Y --> Z

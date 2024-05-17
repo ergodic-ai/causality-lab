@@ -1,6 +1,8 @@
 # pycharm filesgit
 .idea/
 
+.venv
+
 # vs-code files
 .vscode/
 
