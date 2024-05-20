@@ -1,7 +1,8 @@
 numpy
 scipy
 matplotlib
-pandas 
+pandas
 fastapi
 uvicorn[standard]
 pydantic
+openai

@@ -2,6 +2,7 @@
 .idea/
 
 .venv
+.env
 
 # vs-code files
 .vscode/

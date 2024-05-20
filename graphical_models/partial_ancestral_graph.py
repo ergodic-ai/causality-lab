@@ -12,7 +12,7 @@ class PAG(MixedGraph):
     and six edge types: o--o, o---, o-->, --->, <-->, and ----
     """
 
-    def __init__(self, nodes_set):
+    def __init__(self, nodes_set, logger=None):
         super().__init__(nodes_set, [Mark.Circle, Mark.Directed, Mark.Tail])
         self.sepset = constraint_based.SeparationSet(nodes_set)
         self.visible_edges = None  # a set of visible edges, where each element is a tuple: (parent, child)
@@ -28,6 +28,7 @@ class PAG(MixedGraph):
             9: self.orient_by_rule_9,  # required for tail-completeness
             10: self.orient_by_rule_10,  # required for tail-completeness
         }
+        self.logger = logger
 
     def init_from_adj_mat(self, adj_mat: np.ndarray, nodes_order: list = None):
         """
@@ -923,6 +924,16 @@ class PAG(MixedGraph):
                         node_target=node_z,
                         requested_edge_mark=Mark.Directed,
                     )  # orient Y *--> Z
+                    if self.logger is not None:
+                        self.logger.log(
+                            "Oriented v-structure: node_a *--> node_b <--* node_c",
+                            metadata={
+                                "action": "orient_v_structure",
+                                "node_a": node_x,
+                                "node_b": node_z,
+                                "node_c": node_y,
+                            },
+                        )
 
     def maximally_orient_pattern(self, rules_set=None):
         """
@@ -965,6 +976,18 @@ class PAG(MixedGraph):
                         )  # head edge-mark
                         graph_modified = True
 
+                        if self.logger is not None:
+                            self.logger.log(
+                                # f"Removing edge {node_i} -- {node_j} based on the conditioning set: {cond_set}",
+                                f"Orienting edges node_a *--> node_b ---> node_c",
+                                metadata={
+                                    "action": "orient_edge_1",
+                                    "node_a": node_a,
+                                    "node_b": node_b,
+                                    "node_c": node_c,
+                                },
+                            )
+
         return graph_modified
 
     def orient_by_rule_2(self):
@@ -996,6 +1019,16 @@ class PAG(MixedGraph):
                             requested_edge_mark=Mark.Directed,
                         )
                         graph_modified = True
+                        if self.logger is not None:
+                            self.logger.log(
+                                f"Orienting edge node_a *--> node_c",
+                                metadata={
+                                    "action": "orient_edge_2",
+                                    "node_a": node_a,
+                                    "node_b": node_b,
+                                    "node_c": node_c,
+                                },
+                            )
 
         # case (2): If A ---> B *--> C, and A *--o C, then orient A *--> C
         for node_c in self.nodes_set:
@@ -1017,6 +1050,16 @@ class PAG(MixedGraph):
                             requested_edge_mark=Mark.Directed,
                         )
                         graph_modified = True
+                        if self.logger is not None:
+                            self.logger.log(
+                                f"Orienting edge node_a *--> node_c",
+                                metadata={
+                                    "action": "orient_edge_2",
+                                    "node_a": node_a,
+                                    "node_b": node_b,
+                                    "node_c": node_c,
+                                },
+                            )
 
         return graph_modified
 
@@ -1045,6 +1088,17 @@ class PAG(MixedGraph):
                             requested_edge_mark=Mark.Directed,
                         )
                         graph_modified = True
+                        if self.logger is not None:
+                            self.logger.log(
+                                f"Orienting edge node_d *--> node_b",
+                                metadata={
+                                    "action": "orient_edge_3",
+                                    "node_a": node_a,
+                                    "node_b": node_b,
+                                    "node_c": node_c,
+                                    "node_d": node_d,
+                                },
+                            )
 
         return graph_modified
 
@@ -1085,6 +1139,17 @@ class PAG(MixedGraph):
                                     node_target=node_b,
                                     requested_edge_mark=Mark.Tail,
                                 )
+                                if self.logger is not None:
+                                    self.logger.log(
+                                        f"Orienting edge node_b ---> node_c",
+                                        metadata={
+                                            "action": "orient_edge_4",
+                                            "node_a": node_a,
+                                            "node_b": node_b,
+                                            "node_c": node_c,
+                                            "node_d": node_d,
+                                        },
+                                    )
                             else:
                                 # orient A <--> B <--> C
                                 self.replace_edge_mark(
@@ -1107,6 +1172,18 @@ class PAG(MixedGraph):
                                     node_target=node_b,
                                     requested_edge_mark=Mark.Directed,
                                 )
+
+                                if self.logger is not None:
+                                    self.logger(
+                                        f"Orienting edge node_a <--> node_b <--> node_c",
+                                        metadata={
+                                            "action": "orient_edge_4",
+                                            "node_a": node_a,
+                                            "node_b": node_b,
+                                            "node_c": node_c,
+                                            "node_d": node_d,
+                                        },
+                                    )
 
                             graph_modified = True
 
@@ -1198,6 +1275,16 @@ class PAG(MixedGraph):
                         requested_edge_mark=Mark.Tail,
                     )  # tail edge-mark
                     graph_modified = True
+                    if self.logger is not None:
+                        self.logger.log(
+                            f"Orienting edge node_b ---* node_c",
+                            metadata={
+                                "action": "orient_edge_6",
+                                "node_a": node_a,
+                                "node_b": node_b,
+                                "node_c": node_c,
+                            },
+                        )
 
         return graph_modified
 

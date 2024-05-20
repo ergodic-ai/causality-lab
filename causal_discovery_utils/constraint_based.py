@@ -64,7 +64,7 @@ class LearnStructBase:
         self.ci_test = ci_test
         self.sepset = SeparationSet(nodes_set)
         self.graph = graph_class(
-            nodes_set
+            nodes_set, logger=logger
         )  # e.g., graph_class=PDAG (for CPDAG under causal sufficiency) or PAG
         self.graph.sepset = (
             self.sepset

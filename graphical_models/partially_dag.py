@@ -7,14 +7,17 @@ class PDAG(MixedGraph):
     """
     Partially directed graph having two type of arrowheads: directed (--> node) and undirected (--- node)
     """
-    def __init__(self, nodes_set):
+
+    def __init__(self, nodes_set, logger):
         super().__init__(nodes_set, [Mark.Undirected, Mark.Directed])
         self.orientation_rules = {
             1: self.orient_by_rule_1,
             2: self.orient_by_rule_2,
             3: self.orient_by_rule_3,
-            4: self.orient_by_rule_4
+            4: self.orient_by_rule_4,
         }
+
+        self.logger = logger
 
     # --- graph initialization functions ------------------------------------------------------------------------------
     def create_complete_graph(self, nodes_set=None):
@@ -73,7 +76,9 @@ class PDAG(MixedGraph):
         :param target_node: a node
         :return: Fan-in of node target_node
         """
-        return len(self.parents(target_node)) + len(self.undirected_neighbors(target_node))
+        return len(self.parents(target_node)) + len(
+            self.undirected_neighbors(target_node)
+        )
 
     def get_num_edges(self):
         """
@@ -83,7 +88,7 @@ class PDAG(MixedGraph):
         num_edges = 0.0
         for node in self._graph:
             num_edges += len(self._graph[node][Mark.Directed])
-            num_edges += 0.5*len(self._graph[node][Mark.Undirected])
+            num_edges += 0.5 * len(self._graph[node][Mark.Undirected])
 
         return int(num_edges)
 
@@ -134,8 +139,10 @@ class PDAG(MixedGraph):
         past_neighbors = {source_node}
         for node_neighbor in neighbors_set:
             past_neighbors.add(node_neighbor)
-            new_en_nodes = en_nodes-past_neighbors
-            if self.is_reachable_any_undirected(node_neighbor, target_set, new_en_nodes):
+            new_en_nodes = en_nodes - past_neighbors
+            if self.is_reachable_any_undirected(
+                node_neighbor, target_set, new_en_nodes
+            ):
                 return True
         else:
             return False
@@ -154,13 +161,21 @@ class PDAG(MixedGraph):
 
         parents_set = set()
         for node in en_nodes:
-            parents_set.update(self.parents(node) & en_nodes)  # update the set of nodes that are parents of someone
+            parents_set.update(
+                self.parents(node) & en_nodes
+            )  # update the set of nodes that are parents of someone
 
-        leaves_set = en_nodes - parents_set  # nodes that are not parents of any endogenous node
+        leaves_set = (
+            en_nodes - parents_set
+        )  # nodes that are not parents of any endogenous node
         if len(leaves_set) == 0:
-            return [parents_set]  # couldn't distinguish between different topological orders
+            return [
+                parents_set
+            ]  # couldn't distinguish between different topological orders
         else:
-            high_topological_ordering = self.find_partial_topological_order(parents_set)  # recursive call
+            high_topological_ordering = self.find_partial_topological_order(
+                parents_set
+            )  # recursive call
             return [leaves_set] + high_topological_ordering
 
     # --- functions that modify the graph -----------------------------------------------------------------------------
@@ -173,9 +188,25 @@ class PDAG(MixedGraph):
         :param target_node: to be a child node
         :return:
         """
-        self._graph[target_node][Mark.Directed].add(source_node)  # add a directed arrow head
-        self._graph[target_node][Mark.Undirected].discard(source_node)  # remove an undirected arrow head
-        self._graph[source_node][Mark.Undirected].discard(target_node)  # remove an undirected arrow head
+        self._graph[target_node][Mark.Directed].add(
+            source_node
+        )  # add a directed arrow head
+        self._graph[target_node][Mark.Undirected].discard(
+            source_node
+        )  # remove an undirected arrow head
+        self._graph[source_node][Mark.Undirected].discard(
+            target_node
+        )  # remove an undirected arrow head
+
+        if self.logger is not None:
+            self.logger.log(
+                f"Oriented edge {source_node} --> {target_node}",
+                metadata={
+                    "action": "orient_edge",
+                    "source_node": source_node,
+                    "target_node": target_node,
+                },
+            )
 
     def delete_directed_edge(self, source_node, target_node):
         """
@@ -197,8 +228,12 @@ class PDAG(MixedGraph):
         self._graph[node_j][Mark.Undirected].discard(node_i)
 
     def delete_edge(self, node_i, node_j):
-        self.delete_directed_edge(node_i, node_j)  # delete directed arrow head into node j
-        self.delete_directed_edge(node_j, node_i)  # delete directed arrow head into node i
+        self.delete_directed_edge(
+            node_i, node_j
+        )  # delete directed arrow head into node j
+        self.delete_directed_edge(
+            node_j, node_i
+        )  # delete directed arrow head into node i
         self.delete_undirected_edge(node_i, node_j)  # delete undirected arrow heads
 
     def add_edges(self, parents_set, target_node, arrowhead_type=Mark.Undirected):
@@ -208,7 +243,9 @@ class PDAG(MixedGraph):
         self._graph[target_node][arrowhead_type] |= parents_set
         if arrowhead_type == Mark.Undirected:
             for parent_node in parents_set:
-                self._graph[parent_node][Mark.Undirected].add(target_node)  # reverse edge
+                self._graph[parent_node][Mark.Undirected].add(
+                    target_node
+                )  # reverse edge
 
     def convert_bidirected_to_undirected(self, nodes=None):
         """
@@ -221,8 +258,13 @@ class PDAG(MixedGraph):
             nodes = self.nodes_set
 
         for node_x, node_y in combinations(nodes, 2):
-            if node_y in self._graph[node_x][Mark.Directed] and node_x in self._graph[node_y][Mark.Directed]:
-                self._graph[node_x][Mark.Directed].discard(node_y)  # remove directed heads
+            if (
+                node_y in self._graph[node_x][Mark.Directed]
+                and node_x in self._graph[node_y][Mark.Directed]
+            ):
+                self._graph[node_x][Mark.Directed].discard(
+                    node_y
+                )  # remove directed heads
                 self._graph[node_y][Mark.Directed].discard(node_x)
                 self._graph[node_x][Mark.Undirected].add(node_y)  # add undirected heads
                 self._graph[node_y][Mark.Undirected].add(node_x)
@@ -232,7 +274,10 @@ class PDAG(MixedGraph):
             nodes = self.nodes_set
 
         for node_x, node_y in combinations(nodes, 2):
-            if node_y in self._graph[node_x][Mark.Directed] or node_x in self._graph[node_y][Mark.Directed]:
+            if (
+                node_y in self._graph[node_x][Mark.Directed]
+                or node_x in self._graph[node_y][Mark.Directed]
+            ):
                 # remove directed heads
                 if node_y in self._graph[node_x][Mark.Directed]:
                     self._graph[node_x][Mark.Directed].discard(node_y)
@@ -270,11 +315,15 @@ class PDAG(MixedGraph):
         """
         graph_modified = False
         for node_y in en_nodes:
-            x_nodes = self.undirected_neighbors(node_y).copy()  # neighbors of the current Y
+            x_nodes = self.undirected_neighbors(
+                node_y
+            ).copy()  # neighbors of the current Y
             for node_x in x_nodes:  # test all undirected edges "into" Y
                 for node_z in self.parents(node_x):
                     if not self.is_connected(node_z, node_y):
-                        self.orient_edge(source_node=node_x, target_node=node_y)  # orient X --> Y
+                        self.orient_edge(
+                            source_node=node_x, target_node=node_y
+                        )  # orient X --> Y
                         graph_modified = True
                         break  # X --> Y was oriented so stop searching through Z nodes and go to the next X --- Y
 
@@ -312,7 +361,9 @@ class PDAG(MixedGraph):
             x_nodes = self.undirected_neighbors(node_y).copy()
             wz_nodes = self.parents(node_y)
             for node_x in x_nodes:
-                wz_nodes_of_x = self.undirected_neighbors(node_x).intersection(wz_nodes)  # W,Z neighbors of X
+                wz_nodes_of_x = self.undirected_neighbors(node_x).intersection(
+                    wz_nodes
+                )  # W,Z neighbors of X
                 for node_w, node_z in combinations(wz_nodes_of_x, 2):
                     if self.is_connected(node_w, node_z):
                         continue  # skip as W and Z are connected
@@ -337,9 +388,13 @@ class PDAG(MixedGraph):
             z_nodes = self.parents(node_y)
             for node_x in x_nodes:
                 for node_z in z_nodes:
-                    if not self.is_connected(node_z, node_x):  # make sure Z and X are connected
+                    if not self.is_connected(
+                        node_z, node_x
+                    ):  # make sure Z and X are connected
                         continue  # skip and search for the next Z for the given X node
-                    w_nodes = self.parents(node_z).intersection(self.undirected_neighbors(node_x))
+                    w_nodes = self.parents(node_z).intersection(
+                        self.undirected_neighbors(node_x)
+                    )
                     if len(w_nodes) > 0:
                         self.orient_edge(source_node=node_x, target_node=node_y)
                         graph_updated = True
@@ -355,8 +410,12 @@ class PDAG(MixedGraph):
         target_pdag = PDAG(self.nodes_set)
 
         for node in self.nodes_set:
-            target_pdag._graph[node][Mark.Undirected] = self._graph[node][Mark.Undirected].copy()
-            target_pdag._graph[node][Mark.Directed] = self._graph[node][Mark.Directed].copy()
+            target_pdag._graph[node][Mark.Undirected] = self._graph[node][
+                Mark.Undirected
+            ].copy()
+            target_pdag._graph[node][Mark.Directed] = self._graph[node][
+                Mark.Directed
+            ].copy()
 
         return target_pdag
 
@@ -395,10 +454,12 @@ class PDAG(MixedGraph):
             parents = source_pdag.parents(node) & exen_nodes
             neighbors = source_pdag.undirected_neighbors(node) & exen_nodes
 
-            self.add_edges(parents_set=parents, target_node=node,
-                           arrowhead_type=Mark.Directed)  # add directed arrowheads
-            self.add_edges(parents_set=neighbors, target_node=node,
-                           arrowhead_type=Mark.Undirected)  # add undirected arrowheads
+            self.add_edges(
+                parents_set=parents, target_node=node, arrowhead_type=Mark.Directed
+            )  # add directed arrowheads
+            self.add_edges(
+                parents_set=neighbors, target_node=node, arrowhead_type=Mark.Undirected
+            )  # add undirected arrowheads
 
     def convert_to_dag(self, dag):
         """
@@ -409,12 +470,14 @@ class PDAG(MixedGraph):
         def select_node(a_nodes_1, cpdag_1):
             for node_x1 in a_nodes_1:
                 if cpdag_1.is_sink(node_x1):
-                    x_adjacent = cpdag_1.undirected_neighbors(node_x1) | cpdag_1.parents(node_x1)
+                    x_adjacent = cpdag_1.undirected_neighbors(
+                        node_x1
+                    ) | cpdag_1.parents(node_x1)
                     y_nodes1 = cpdag_1.undirected_neighbors(node_x1)
 
                     # all the undirected neighbors should be connected to all the adjacencies of x
                     for node_y1 in y_nodes1:
-                        for node_adj_x in x_adjacent-{node_y1}:
+                        for node_adj_x in x_adjacent - {node_y1}:
                             if not cpdag_1.is_connected(node_y1, node_adj_x):
                                 break
                         else:

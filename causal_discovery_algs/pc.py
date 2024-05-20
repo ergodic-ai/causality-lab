@@ -77,8 +77,9 @@ class LearnStructPC(LearnStructBase):
                     if cond_indep(node_i, node_j, cond_set):
                         if verbose and logger is not None:
                             logger.log(
-                                "Removing",
+                                f"Removing edge {node_i} -- {node_j} based on the conditioning set: {cond_set}",
                                 metadata={
+                                    "action": "remove_edge",
                                     "node_i": node_i,
                                     "node_j": node_j,
                                     "cond_set": list(cond_set),
