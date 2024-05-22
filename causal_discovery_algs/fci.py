@@ -88,21 +88,21 @@ class LearnStructFCI(LearnStructBase):
         k += 1
         if n == k:
             self.graph.apply_domain_knowledge(self.domain_knowledge)
-            self.logger.graph(self.graph._graph)
+            # self.logger.graph(self.graph._graph)
 
         # the resulting graph consists of only o--o edges
         # find and orient v-structures
         k += 1
         if n == k:
             self.graph.orient_v_structures(self.sepset)
-            self.logger.graph(self.graph._graph)
+            # self.logger.graph(self.graph._graph)
 
         # the resulting graph has only o--o, o-->, or <--> edges
         # find and remove edges between pairs of variables that are d-separated by some subset of Possible-D-SEP sets
         k += 1
         if n == k:
             self.found_D_Sep_link = self._refine_pc_skeleton()
-            self.logger.graph(self.graph._graph)
+            # self.logger.graph(self.graph._graph)
 
         # re-orient
         k += 1
@@ -110,7 +110,7 @@ class LearnStructFCI(LearnStructBase):
             self.graph.reset_orientations(default_mark=Mark.Circle)
             self.graph.orient_v_structures(self.sepset)
             self.graph.maximally_orient_pattern(rules_set=[1, 2, 3, 4])
-            self.logger.graph(self.graph._graph)
+            # self.logger.graph(self.graph._graph)
 
         k += 1
         if n == k:
@@ -120,7 +120,7 @@ class LearnStructFCI(LearnStructBase):
                 self.graph.maximally_orient_pattern(rules_set=[8, 9, 10])
 
             self.graph.apply_domain_knowledge(self.domain_knowledge)
-            self.logger.graph(self.graph._graph)
+            # self.logger.graph(self.graph._graph)
 
         self.iter_n += 1
         if n > k:

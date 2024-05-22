@@ -7,11 +7,69 @@ from causal_discovery_algs.fci import LearnStructFCI
 from causal_discovery_utils.cond_indep_tests import CondIndepParCorr
 from causal_discovery_utils.constraint_based import CDLogger, LearnStructBase
 from plot_utils.draw_graph import draw_graph
+from graphical_models.partial_ancestral_graph import PAG
 
 from graphical_models import arrow_head_types as Mark
+import networkx as nx
 
 
 MARKS = ["---", "<--", "o--"]  # X--*Y  (for PAGs)
+
+
+def is_DAG(edges):
+
+    G = nx.DiGraph()
+    for edge in edges:
+        if edge["data"]["edge_type"] == "undirected":
+            return False
+        G.add_edge(edge["source"], edge["target"])
+    return nx.is_directed_acyclic_graph(G)
+
+
+import numpy as np
+
+
+def edges_to_adjacency_matrix(edges, mapping):
+    n = len(mapping)
+    adj_mat = np.zeros((n, n), dtype=int)
+
+    reverse_mapping = {v: k for k, v in enumerate(mapping)}
+    relationship_map = {"partially_known": 1, "arrow": 2, "directed": 3}
+
+    inverse_relationship_map = {v: k for k, v in relationship_map.items()}
+
+    for edge in edges:
+        source = reverse_mapping[edge["source"]]
+        target = reverse_mapping[edge["target"]]
+        edge_type = edge["data"]["edge_type"]
+        relationship = edge["data"].get("relationship", 1)
+
+        if edge_type == "undirected":
+            adj_mat[target, source] = relationship
+            adj_mat[source, target] = relationship
+
+        if edge_type == "partially_known":
+            adj_mat[target, source] = 1
+            adj_mat[source, target] = 2
+
+        if edge_type == "directed":
+            adj_mat[target, source] = 3
+            adj_mat[source, target] = 2
+
+    return adj_mat
+
+
+def edges_to_graph_object(edges):
+    nodes = set()
+    for edge in edges:
+        nodes.add(edge["source"])
+        nodes.add(edge["target"])
+
+    mapping = {node: i for i, node in enumerate(sorted(list(nodes)))}
+    adj_mat = edges_to_adjacency_matrix(edges, mapping)
+    pag = PAG(nodes_set=nodes)
+    pag.init_from_adj_mat(adj_mat, sorted(list(nodes)))
+    return pag
 
 
 def graph_object_to_edges(graph: dict):
@@ -60,40 +118,13 @@ def adjacency_matrix_to_edges(adj_mat, mapping):
                 relationship_backward = adj_mat[j, i]
 
                 if relationship_forward == relationship_backward:
-                    # edges.append(
-                    #     {
-                    #         "id": f"{mapping[i]}-{mapping[j]}",
-                    #         "source": mapping[i],
-                    #         "target": mapping[j],
-                    #         "data": {
-                    #             "edge_type": "undirected",
-                    #             "relationship": relationship_forward,
-                    #         },
-                    #     }
-                    # )
                     edges.append(edge_dict(i, j, "undirected", relationship_forward))
                 else:
                     if relationship_forward == 2:
                         edge_type = relationship_map[relationship_backward]
-                        # edges.append(
-                        #     {
-                        #         "from": mapping[i],
-                        #         "to": mapping[j],
-                        #         "edge_type": edge_type,
-                        #         "relationship": relationship_backward,
-                        #     }
-                        # )
                         edges.append(edge_dict(i, j, edge_type, relationship_backward))
                     else:
                         edge_type = relationship_map[relationship_forward]
-                        # edges.append(
-                        #     {
-                        #         "from": mapping[j],
-                        #         "to": mapping[i],
-                        #         "edge_type": edge_type,
-                        #         "relationship": relationship_forward,
-                        #     }
-                        # )
                         edges.append(edge_dict(j, i, edge_type, relationship_forward))
 
     return edges

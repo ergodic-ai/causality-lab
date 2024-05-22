@@ -30,6 +30,7 @@ class PAG(MixedGraph):
         }
         self.logger = logger
 
+
     def init_from_adj_mat(self, adj_mat: np.ndarray, nodes_order: list = None):
         """
         creates a PAG from a given adjacency matrix.
@@ -43,6 +44,7 @@ class PAG(MixedGraph):
         :param nodes_order: nodes ids. if set to None (default) then using sorted(nodes_set) as nodes ids.
         :return:
         """
+        
         assert adj_mat.ndim == 2
         assert adj_mat.shape[0] == adj_mat.shape[1]
         assert np.sum(adj_mat < 0) == 0 and np.sum(adj_mat > 3) == 0
@@ -89,7 +91,7 @@ class PAG(MixedGraph):
             if relationship == constraint_based.Relationship.CAUSE:
                 self.replace_edge_mark(node_from, node_to, Mark.Directed)
                 self.replace_edge_mark(node_to, node_from, Mark.Undirected)
-                print(self._graph)
+                # print(self._graph)
 
             if relationship == constraint_based.Relationship.CANNOT_CAUSE:
                 if self.is_connected(node_from, node_to):

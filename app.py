@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import numpy
 import pandas
@@ -12,9 +12,24 @@ from server.utils import (
     graph_object_to_edges,
     initialize_fci,
     run_cd,
+    edges_to_graph_object,
 )
+from effekx.DataManager import SCM
+import networkx as nx
+from pydantic import BaseModel
+from server.utils import is_DAG
 
 app = FastAPI()
+
+
+class Cache:
+    def __init__(self, model=None, edges=None, scm=None):
+        self.model = model
+        self.edges = edges
+        self.scm = scm
+
+
+cache = Cache()
 
 # Allow CORS requests from any location
 app.add_middleware(
@@ -57,7 +72,12 @@ class StreamLogger(CDLogger):
 
     def wrap(self, message_json):
         async def send():
-            await self.websocket.send_json(replace_non_compliant_floats(message_json))
+            try:
+                await self.websocket.send_json(
+                    replace_non_compliant_floats(message_json)
+                )
+            except WebSocketDisconnect:
+                print("Client disconnected")
 
         asyncio.create_task(send())
 
@@ -69,8 +89,14 @@ class StreamLogger(CDLogger):
         # print(msg, metadata)
         self.wrap({"message": msg, "metadata": metadata, "dataType": "log"})
 
-    def graph(self, graph: dict):
+    def graph(self, graph: dict, scm=None):
         edges = graph_object_to_edges(graph)
+        if scm is not None:
+            for edge in edges:
+                target = edge["target"]
+                source = edge["source"]
+                edge["data"]["strength"] = scm.get_strength(source, target)
+
         self.wrap(
             {
                 "metadata": edges,
@@ -89,48 +115,98 @@ class StreamLogger(CDLogger):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    model = None
-    logger = StreamLogger(websocket)
-    while True:
-        data = await websocket.receive_json()
-        # print(data)
-        uuid = data.get("uuid", None)
-        if uuid is None:
-            await websocket.send_json({"error": "No UUID provided"})
-            continue
 
-        df = generate_retention_data()
+    model = cache.model
+    edges = cache.edges
+    scm = cache.scm
 
-        message = data.get("message", None)
+    try:
 
-        if message == "hello":
-            model = initialize_fci(df, logger=logger)
-            logger.graph(model.graph._graph)
+        logger = StreamLogger(websocket)
 
-        if message == "run_all":
-            if model is None:
+        if model is not None:
+            try:
+                logger.graph(model.graph._graph, scm)
+            except Exception as e:
+                print(e)
+
+        while True:
+            data = await websocket.receive_json()
+            # print(data)
+            uuid = data.get("uuid", None)
+            if uuid is None:
+                await websocket.send_json({"error": "No UUID provided"})
+                continue
+
+            df = generate_retention_data()
+
+            message = data.get("message", None)
+
+            if message == "hello":
                 model = initialize_fci(df, logger=logger)
-            edges = run_cd(model)
-            ai_response = explain_cg(edges)
-            logger.info(ai_response, metadata={})
-            logger.graph(model.graph._graph)
+                logger.graph(model.graph._graph)
 
-        if message == "iterate":
-            if model is None:
-                model = initialize_fci(df, logger=logger)
-            running = model.learn_structure_iterative()
-            logger.graph(model.graph._graph)
-            if not running:
-                logger.log("Finished.")
+            if message == "run_all":
+                if model is None:
+                    model = initialize_fci(df, logger=logger)
+                # ai_response = explain_cg(run_cd(model))
+                # logger.info(ai_response, metadata={})
                 edges = graph_object_to_edges(model.graph._graph)
+                if is_DAG(edges):
+                    message = "fit"
+                else:
+                    logger.graph(model.graph._graph)
 
-                async def explain_task():
-                    ai_response = explain_cg(edges)
-                    logger.info(ai_response, metadata={})
+            if message == "iterate":
+                if model is None:
+                    model = initialize_fci(df, logger=logger)
+                running = model.learn_structure_iterative()
+                edges = graph_object_to_edges(model.graph._graph)
+                if is_DAG(edges):
+                    message = "fit"
+                else:
+                    logger.graph(model.graph._graph)
 
-                asyncio.create_task(explain_task())
+                if not running:
+                    logger.log("Finished.")
 
-        await websocket.send_json({"message": "Message received"})
+                    async def explain_task():
+                        ai_response = explain_cg(edges)
+                        logger.info(ai_response, metadata={})
+
+                    # asyncio.create_task(explain_task())
+
+            if message == "json":
+                edges = data["data"]["edges"]
+
+                graph_obj = edges_to_graph_object(edges)
+                if model is None:
+                    model = initialize_fci(df, logger=logger)
+
+                model.graph = graph_obj
+                if is_DAG(edges):
+                    message = "fit"
+                else:
+                    logger.graph(model.graph._graph)
+
+            if message == "fit":
+                edge_list = [(x["source"], x["target"]) for x in edges]
+                causal_graph = nx.DiGraph(edge_list)
+                scm = SCM(data=df, graph=causal_graph, logger=logger)
+                scm.fit_all()
+                logger.log("Finished fitting SCM")
+                logger.graph(model.graph._graph, scm=scm)
+
+            cache.model = model
+            cache.edges = edges
+            cache.scm = scm
+            print("Cache updated")
+
+            await websocket.send_json({"message": "Message received"})
+    except WebSocketDisconnect as e:
+        print("Client disconnected")
+    # except Exception as e:
+    #     print(e)
 
 
 if __name__ == "__main__":
