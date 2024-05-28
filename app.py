@@ -1,11 +1,12 @@
 import asyncio
+import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import numpy
 import pandas
 from typing import Optional
 from causal_discovery_utils.constraint_based import CDLogger
-from server.ai import explain_cg
+from server.ai import explain_cg, get_recs
 from server.utils import (
     generate_random_data,
     generate_retention_data,
@@ -89,6 +90,12 @@ class StreamLogger(CDLogger):
         # print(msg, metadata)
         self.wrap({"message": msg, "metadata": metadata, "dataType": "log"})
 
+    def report(self, msg: str, metadata: Optional[dict] = None) -> None:
+        self.wrap({"message": msg, "metadata": metadata, "dataType": "report"})
+
+    def send_wait(self, msg: str, metadata: Optional[dict] = None) -> None:
+        self.wrap({"message": msg, "metadata": metadata, "dataType": "wait"})
+
     def graph(self, graph: dict, scm=None):
         edges = graph_object_to_edges(graph)
         if scm is not None:
@@ -112,16 +119,29 @@ class StreamLogger(CDLogger):
         self.log(msg, metadata)
 
 
+def test_blocking_fn():
+    time.sleep(10)
+    return "AI response"
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    loop = asyncio.get_running_loop()
 
     model = cache.model
     edges = cache.edges
     scm = cache.scm
 
-    try:
+    async def get_ai_response(edges, scm):
+        res = await loop.run_in_executor(None, explain_cg, edges, scm)
+        return res
 
+    async def get_ai_recommendations(edges, scm, effects):
+        res = await loop.run_in_executor(None, get_recs, edges, scm, effects)
+        return res
+
+    try:
         logger = StreamLogger(websocket)
 
         if model is not None:
@@ -132,6 +152,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         while True:
             data = await websocket.receive_json()
+            logger.send_wait("Received message. Processing...", metadata={"wait": True})
             # print(data)
             uuid = data.get("uuid", None)
             if uuid is None:
@@ -147,17 +168,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.graph(model.graph._graph)
 
             if message == "run_all":
+                logger.send_wait("Running causal discovery.", metadata={"wait": True})
                 if model is None:
                     model = initialize_fci(df, logger=logger)
-                # ai_response = explain_cg(run_cd(model))
-                # logger.info(ai_response, metadata={})
+                _ = run_cd(model)
                 edges = graph_object_to_edges(model.graph._graph)
                 if is_DAG(edges):
-                    message = "fit"
+                    message = "fit_explain"
                 else:
                     logger.graph(model.graph._graph)
 
             if message == "iterate":
+                logger.send_wait("Stepping...", metadata={"wait": True})
                 if model is None:
                     model = initialize_fci(df, logger=logger)
                 running = model.learn_structure_iterative()
@@ -177,6 +199,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # asyncio.create_task(explain_task())
 
             if message == "json":
+                logger.send_wait("Receiving causal graph...", metadata={"wait": True})
                 edges = data["data"]["edges"]
 
                 graph_obj = edges_to_graph_object(edges)
@@ -189,20 +212,79 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     logger.graph(model.graph._graph)
 
-            if message == "fit":
+            if message == "optimize":
+                logger.send_wait("Optimizing actions...", metadata={"wait": True})
+                print("optimize")
+                if scm is None:
+                    logger.log("No SCM found. Please fit the model first.")
+
+                else:
+                    logger.report("Optimization report: blablabla")
+
+            if message.startswith("fit"):
+                logger.send_wait("Updating causal model...", metadata={"wait": True})
+                edges = graph_object_to_edges(model.graph._graph)
                 edge_list = [(x["source"], x["target"]) for x in edges]
                 causal_graph = nx.DiGraph(edge_list)
                 scm = SCM(data=df, graph=causal_graph, logger=logger)
+                # print(scm.data_types)
                 scm.fit_all()
                 logger.log("Finished fitting SCM")
                 logger.graph(model.graph._graph, scm=scm)
 
+            if "explain" in message:
+                logger.send_wait("Generating graph summary...", metadata={"wait": True})
+                edges = graph_object_to_edges(model.graph._graph)
+                ai_response = await get_ai_response(edges, scm)
+                logger.report(ai_response, metadata={})
+                message = "effects"
+
+            if message == "effects":
+                logger.send_wait(
+                    "Calculating causal effects...", metadata={"wait": True}
+                )
+                edges = graph_object_to_edges(model.graph._graph)
+                edge_list = [(x["source"], x["target"]) for x in edges]
+                causal_graph = nx.DiGraph(edge_list)
+                end_node = data.get("data", {}).get("target", None)
+
+                print(end_node)
+                if end_node is None:
+                    end_nodes = [
+                        x
+                        for x in causal_graph.nodes()
+                        if causal_graph.out_degree(x) == 0
+                    ]
+                    if len(end_nodes):
+                        end_node = end_nodes[0]
+
+                if end_node is not None:
+                    scm = SCM(data=df, graph=causal_graph, logger=logger)
+                    scm.fit_all()
+
+                    nodes = list(nx.ancestors(causal_graph, end_node))
+                    results = []
+                    for node in nodes:
+                        res = scm.get_total_strength(node, end_node)
+                        results.append(res)
+
+                    results = sorted(results, key=lambda x: abs(x["total_strength"]))
+                    metadata = {
+                        "end_node": end_node,
+                        "results": results,
+                        "action": "effects",
+                    }
+
+                    logger.report("Effects report.", metadata=metadata)
+
+                    ai_response = await get_ai_recommendations(edges, scm, results)
+                    logger.report(ai_response, metadata={})
+
             cache.model = model
             cache.edges = edges
             cache.scm = scm
-            print("Cache updated")
+            logger.send_wait("Finished!", metadata={"wait": False})
 
-            await websocket.send_json({"message": "Message received"})
     except WebSocketDisconnect as e:
         print("Client disconnected")
     # except Exception as e:

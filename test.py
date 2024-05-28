@@ -1,3 +1,4 @@
+import networkx
 import pandas
 import numpy
 from pandas.io.formats.style_render import Optional
@@ -9,9 +10,11 @@ from causal_discovery_utils.constraint_based import (
     DomainKnowledge,
     Relationship,
 )
+from effekx.DataManager import SCM
 from plot_utils.draw_graph import draw_graph
 from server.utils import (
     adjacency_matrix_to_edges,
+    generate_retention_data,
     graph_object_to_edges,
     initialize_fci,
     run_cd,
@@ -38,25 +41,32 @@ class MyLogger(CDLogger):
 
 
 def main():
-    n = 10000
-    C1 = numpy.random.normal(size=(n,))
-    C2 = numpy.random.normal(size=(n,))
-    T1 = C1 + C2 + numpy.random.normal(size=(n,))
-    T2 = C1 + C2 + numpy.random.normal(size=(n,))
-    T3 = T2 + T1 + numpy.random.normal(size=(n,))
-
-    data = pandas.DataFrame({"C1": C1, "C2": C2, "T1": T1, "T2": T2, "T3": T3})
-
-    data.to_csv("test_data.csv", index=False)
-
-    # return
-    # domain_knowledge = [
-    #     {"node_from": "C1", "node_to": "T1", "relationship": Relationship.CANNOT_CAUSE}
-    # ]
-    # domain_knowledge = [DomainKnowledge(**dk) for dk in domain_knowledge]
-    model = initialize_fci(data, logger=MyLogger())
+    df = generate_retention_data()
+    logger = MyLogger()
+    model = initialize_fci(df, logger=logger)
     edges = run_cd(model)
-    draw_graph(model.graph)
+    edge_list = [(x["source"], x["target"]) for x in edges]
+    causal_graph = networkx.DiGraph(edge_list)
+    nodes = list(networkx.ancestors(causal_graph, "retention"))
+
+    print(df.corr())
+    df.to_csv("RetentionData.csv", index=False)
+
+    # print("endnodes: ")
+    # print([x for x in causal_graph.nodes() if causal_graph.out_degree(x) == 0])
+
+    # scm = SCM(data=df, graph=causal_graph, logger=logger)
+    # scm.fit_all()
+
+    # results = []
+    # for node in nodes:
+    #     res = scm.get_total_strength("service_problems", "retention")
+    #     results.append(res)
+
+    # results = sorted(results, key=lambda x: abs(x["total_strength"]), reverse=True)
+    # for res in results:
+    #     print(" * * * ")
+    #     print(res)
 
 
 if __name__ == "__main__":

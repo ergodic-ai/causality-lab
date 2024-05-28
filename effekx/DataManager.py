@@ -195,12 +195,10 @@ def marginal_contribution(x):
 
 
 def quantile_abs(values, percentile: int = 90):
-
     # Reshape values as 1d array
     values = numpy.array(values).flatten()
 
-
-    #sort based on absolute value
+    # sort based on absolute value
     values = sorted(values, key=abs, reverse=True)
 
     n_items = len(values)
@@ -326,22 +324,38 @@ class SCM:
         assert source in self.graph.nodes, f"Node {source} not found in graph"
         assert target in self.graph.nodes, f"Node {target} not found in graph"
 
+        results = {}
         paths = list(networkx.all_simple_paths(self.graph, source, target))
+
+        results["paths"] = []
 
         if len(paths) == 0:
             return 0
 
         total_strength = 0
         for path in paths:
+            d = {}
+            d["path"] = path
+
             strength = 1
+            d["breakdown"] = []
             for i in range(1, len(path)):
                 parent = path[i - 1]
                 child = path[i]
-                strength *= self.get_strength(parent, child)
+                s = self.get_strength(parent, child)
+                strength *= s
+                d["breakdown"].append(
+                    {"source": parent, "target": child, "strength": s}
+                )
 
+            d["strength"] = strength
+            results["paths"].append(d)
             total_strength += strength
 
-        return total_strength
+        results["total_strength"] = total_strength
+        results["source"] = source
+        results["target"] = target
+        return results
 
     def get_strength(self, source: str, target: str):
         assert target in self.explanations, f"Explanations for node {target} not found"
@@ -352,9 +366,13 @@ class SCM:
         return 0
 
     def fit(self, node: str):
-        X, y, isClassification, feature_groups, normalization = (
-            self.prepare_modelling_data(node)
-        )
+        (
+            X,
+            y,
+            isClassification,
+            feature_groups,
+            normalization,
+        ) = self.prepare_modelling_data(node)
         features = list(X.columns)
         if isClassification:
             model = LogisticRegression(multi_class="multinomial")

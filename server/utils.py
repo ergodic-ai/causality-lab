@@ -17,7 +17,6 @@ MARKS = ["---", "<--", "o--"]  # X--*Y  (for PAGs)
 
 
 def is_DAG(edges):
-
     G = nx.DiGraph()
     for edge in edges:
         if edge["data"]["edge_type"] == "undirected":
@@ -179,11 +178,10 @@ def generate_retention_data():
 
     engagement = numpy.random.normal(size=(n,)) + new_items - stale_items
     retention = (
-        numpy.random.normal(size=(n,))
-        + discount
-        - 0.5 * 1.5 * service_problems
-        + engagement
+        numpy.random.normal(size=(n,)) + discount - 1.5 * service_problems + engagement
     )
+
+    retention = (retention > 0).astype(int)
 
     data = pandas.DataFrame(
         {
