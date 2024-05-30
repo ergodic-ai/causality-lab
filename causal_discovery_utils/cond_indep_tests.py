@@ -341,6 +341,108 @@ class StatCondIndep:
         return self.retained_graph.is_connected(x, y)
 
 
+class StatCondIndepDF:
+    def __init__(
+        self,
+        dataset,
+        threshold,
+        database_type,
+        weights=None,
+        retained_edges=None,
+        count_tests=False,
+        use_cache=False,
+        verbose=False,
+        num_records=None,
+        num_vars=None,
+    ):
+        """
+        Base class for statistical conditional independence tests
+        :param dataset:
+        :param threshold:
+        :param database_type: data type (e,g., int)
+        :param weights: an array of values indicating weight of each individual data sample
+        :param retained_edges: an undirected graph containing edges between nodes that are dependent (not to be tested)
+        :param count_tests: if True, count the number of CI test queries (default: False). Mainly for debug
+        """
+        self.verbose = verbose
+
+        if dataset is None:
+            raise Exception("Dataset is required")
+
+        if not isinstance(dataset, pandas.DataFrame):
+            raise Exception("Dataset must be a pandas DataFrame")
+
+        self.columns = list(dataset.columns)
+        num_records, num_vars = dataset.shape
+
+        if retained_edges is None:
+            self.retained_graph = UndirectedGraph(set(self.columns))
+            self.retained_graph.create_empty_graph()
+        else:
+            self.retained_graph = retained_edges
+
+        node_size = None
+
+        self.data = dataset
+        self.num_records = num_records
+        self.num_vars = num_vars
+        self.node_size = None
+        self.threshold = threshold
+        self.weights = weights
+
+        # Initialize counter of CI tests per conditioning set size
+        self.count_tests = count_tests
+        if count_tests:
+            self.test_counter = [0 for _ in range(num_vars - 1)]
+        else:
+            self.test_counter = None
+
+        # Initialize cache
+        self.is_cache = use_cache
+        if use_cache:
+            self.cache_ci = CacheCI(num_vars)
+        else:
+            self.cache_ci = CacheCI(None)
+
+    def cond_indep(self, x, y, zz):
+        if self.is_edge_retained(x, y):
+            return False  # do not test and return: "not independent"
+
+        statistic = self.cache_ci.get_cache_result(x, y, zz)
+
+        if statistic is None:
+            statistic = self.calc_statistic(x, y, zz)  # calculate correlation level
+            self._debug_process(x, y, zz, statistic)
+            self._cache_it(x, y, zz, statistic)
+
+        res = (
+            statistic > self.threshold
+        )  # test if p-value is greater than the threshold
+        return res
+
+    def calc_statistic(self, x, y, zz):
+        return None  # you must override this function in inherited classes
+
+    def _debug_process(self, x, y, zz, res):
+        """
+        Handles all tasks required for debug
+        """
+        if self.verbose:
+            print("Test: ", "CI(", x, ",", y, "|", zz, ")", "=", res)
+        if self.count_tests:
+            self.test_counter[len(zz)] += 1
+
+    def _cache_it(self, x, y, zz, res):
+        """
+        Handles all task required after calculating the CI statistic
+        """
+        if self.is_cache and (res is not None):
+            self.cache_ci.set_cache_result(x, y, zz, res)
+
+    def is_edge_retained(self, x, y):
+        return self.retained_graph.is_connected(x, y)
+
+
 class CondIndepParCorr(StatCondIndep):
     def __init__(
         self,

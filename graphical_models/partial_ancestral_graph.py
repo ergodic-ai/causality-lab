@@ -1176,7 +1176,7 @@ class PAG(MixedGraph):
                                 )
 
                                 if self.logger is not None:
-                                    self.logger(
+                                    self.logger.log(
                                         f"Orienting edge node_a <--> node_b <--> node_c",
                                         metadata={
                                             "action": "orient_edge_4",

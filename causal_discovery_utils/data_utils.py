@@ -3,9 +3,12 @@ import numpy as np
 
 def get_var_size(data):
     num_records, num_vars = data.shape
-    node_size = np.zeros((num_vars,), dtype='int')
+    node_size = np.zeros((num_vars,), dtype="int")
     for var in range(num_vars):
-        node_size[var] = data[:, var].max() + 1
+        try:
+            node_size[var] = data[:, var].max() + 1
+        except ValueError:
+            node_size[var] = 0
     # node_size = data.max(axis=0)+1  # number of node states (smallest state 0)
     return node_size
 
@@ -29,12 +32,14 @@ def calc_stats(data, var_size, weights=None):
         # hist_count, _ = np.histogram(data_idx, np.arange(sz_prod + 1), weights=weights)
         hist_count = np.bincount(data_idx, minlength=sz_prod, weights=weights)
     except MemoryError as error:
-        print('Out of memory')
+        print("Out of memory")
         return None
     return hist_count
 
 
-def unroll_temporal_data(data_full, observed_nodes_list, window_len, t_step=1, reverse_temporal_order=False):
+def unroll_temporal_data(
+    data_full, observed_nodes_list, window_len, t_step=1, reverse_temporal_order=False
+):
     """
     Unroll temporally sorted data samples into the defined time window. For example, if the time window is 2, then
     each two consecutive data samples are concatenated into a single sample. The new samples are sorted temporally.
@@ -48,20 +53,34 @@ def unroll_temporal_data(data_full, observed_nodes_list, window_len, t_step=1, r
     :return: An unrolled temporally sorted data samples.
     """
     n_samples = data_full.shape[0]  # number of data samples
-    n_contemporaneous_nodes = data_full.shape[1]  # number of contemporaneous (jointly measured) variables
-    num_nodes_unrolled = window_len * n_contemporaneous_nodes  # number of variables in a single unrolled sample
+    n_contemporaneous_nodes = data_full.shape[
+        1
+    ]  # number of contemporaneous (jointly measured) variables
+    num_nodes_unrolled = (
+        window_len * n_contemporaneous_nodes
+    )  # number of variables in a single unrolled sample
 
     # calculate the starting time index for each unrolled sample
-    starts = [xid * n_contemporaneous_nodes for xid in np.arange(0, n_samples + 1 - window_len, t_step)]
+    starts = [
+        xid * n_contemporaneous_nodes
+        for xid in np.arange(0, n_samples + 1 - window_len, t_step)
+    ]
 
     # create unrolled data
-    data_full_unrolled = np.zeros((len(starts), num_nodes_unrolled))  # initialize unrolled data
+    data_full_unrolled = np.zeros(
+        (len(starts), num_nodes_unrolled)
+    )  # initialize unrolled data
     for i, st in enumerate(starts):
-        data_full_unrolled[i] = data_full.flat[st:st + num_nodes_unrolled]
+        data_full_unrolled[i] = data_full.flat[st : st + num_nodes_unrolled]
 
     # indexes of variables in the unrolled data
-    _nodes_sets_list_full = np.reshape(range(num_nodes_unrolled), (window_len, n_contemporaneous_nodes))
-    _nodes_sets_list = [_nodes_sets_list_full[i, observed_nodes_list].tolist() for i in range(window_len)]  # observed
+    _nodes_sets_list_full = np.reshape(
+        range(num_nodes_unrolled), (window_len, n_contemporaneous_nodes)
+    )
+    _nodes_sets_list = [
+        _nodes_sets_list_full[i, observed_nodes_list].tolist()
+        for i in range(window_len)
+    ]  # observed
 
     if reverse_temporal_order:
         # reverse time order such that indexes [0..n_contemporaneous_nodes-1] represent the latest instances,

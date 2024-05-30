@@ -178,7 +178,7 @@ def generate_retention_data():
 
     engagement = numpy.random.normal(size=(n,)) + new_items - stale_items
     retention = (
-        numpy.random.normal(size=(n,)) + discount - 1.5 * service_problems + engagement
+        numpy.random.normal(size=(n,)) + discount - 3 * service_problems + engagement
     )
 
     retention = (retention > 0).astype(int)

@@ -3,7 +3,7 @@
 
 .venv
 .env
-
+data/
 # vs-code files
 .vscode/
 

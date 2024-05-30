@@ -16,14 +16,14 @@ def is_integer(value):
         value, float
     ):  # Check if value is a float and if it can be safely converted to an int
         return value.is_integer()
-    if isinstance(
-        value, str
-    ):  # Check if value is a string representation of an integer
-        try:
-            int(value)
-            return True
-        except ValueError:
-            return False
+    # if isinstance(
+    #     value, str
+    # ):  # Check if value is a string representation of an integer
+    #     try:
+    #         int(value)
+    #         return True
+    #     except ValueError:
+    #         return False
     return False
 
 
@@ -43,14 +43,18 @@ def truncate_and_one_hot_encode(col: pandas.Series, n_max: int = 5) -> pandas.Da
     top_n_values = col.value_counts().nlargest(n_max).index
 
     # Replace values not in the top n_max most common values with "Others"
-    truncated_col = col.where(col.isin(top_n_values), other="Others")
+    # truncated_col = col.where(col.isin(top_n_values), other="Others")
+    # Ensure "Others" is in the categories if the column is categorical
+    if pandas.api.types.is_categorical_dtype(col):
+        col = col.cat.add_categories(["Others"])
 
+    truncated_col = col.where(col.isin(top_n_values), other="Others")
     # Perform one-hot encoding
     hasNans = truncated_col.isnull().any()
 
     one_hot_encoded_df = pandas.get_dummies(
         truncated_col, prefix=col.name, dummy_na=hasNans, drop_first=True
-    )
+    ).astype(int)
 
     return one_hot_encoded_df
 
@@ -87,6 +91,9 @@ class DataTypeManager:
     def _is_object(self, column: str):
         return self.data[column].dtype == numpy.object_
 
+    def _is_categorical(self, column):
+        return pandas.api.types.is_categorical_dtype(self.data[column])
+
     def _is_integer(self, column):
         return self.data[column].apply(is_integer).all() == True
 
@@ -95,9 +102,6 @@ class DataTypeManager:
 
     def _is_numeric(self, column):
         return pandas.api.types.is_numeric_dtype(self.data[column])
-
-    def _is_categorical(self, column):
-        return pandas.api.types.is_categorical_dtype(self.data[column])
 
     def _is_uid(self, column):
         return len(self.data[column].unique()) == len(self.data)
@@ -114,18 +118,18 @@ class DataTypeManager:
 
     def _get_data_type(self, column: str):
         self._validate_col(column)
-        if self._is_integer(column):
-            return "integer"
         if self._is_binary(column):
             return "binary"
-        if self._is_numeric(column):
-            return "numeric"
         if self._is_categorical(column):
             return "categorical"
-        if self._is_date(column) or self._can_coerce_to_date(column):
+        if self._is_date(column):  # or self._can_coerce_to_date(column):
             return "date"
         if self._is_object(column):
             return "object"
+        if self._is_integer(column):
+            return "integer"
+        if self._is_numeric(column):
+            return "numeric"
         return "unknown"
 
 
@@ -163,7 +167,7 @@ def prep_data(df: pandas.DataFrame, data_types: dict, n_cat_max: int):
 
         if data_type == "categorical" or data_type == "object":
             ohe = truncate_and_one_hot_encode(col_data, n_cat_max)
-            feature_groups[column] = ohe.columns
+            feature_groups[column] = list(ohe.columns)
             prepared_df = pandas.concat([prepared_df, ohe], axis=1)
 
         elif data_type == "binary":
@@ -291,7 +295,10 @@ class SCM:
                 explanations.append(d)
 
         else:
-            coefs_df = pandas.DataFrame(coefs, columns=features, index=model.classes_)
+            classes = model.classes_
+            if len(classes) == 2:
+                classes = [classes[1]]
+            coefs_df = pandas.DataFrame(coefs, columns=features, index=classes)
             for feature_group in feature_groups:
                 d = {}
                 this_df = coefs_df[feature_groups[feature_group]].apply(
