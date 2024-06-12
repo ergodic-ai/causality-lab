@@ -12,7 +12,7 @@ from causal_discovery_utils.constraint_based import (
 )
 from effekx.DataManager import SCM
 from plot_utils.draw_graph import draw_graph
-from server.utils import (
+from causal_server.utils import (
     adjacency_matrix_to_edges,
     generate_retention_data,
     graph_object_to_edges,

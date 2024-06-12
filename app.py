@@ -6,19 +6,19 @@ import numpy
 import pandas
 from typing import Optional
 from causal_discovery_utils.constraint_based import CDLogger
-from server.ai import explain_cg, get_recs
-from server.utils import (
+from causal_server.ai import explain_cg, get_recs
+from causal_server.utils import (
     generate_random_data,
     generate_retention_data,
     graph_object_to_edges,
     initialize_fci,
     run_cd,
     edges_to_graph_object,
+    is_DAG,
 )
 from effekx.DataManager import SCM
 import networkx as nx
 from pydantic import BaseModel
-from server.utils import is_DAG
 
 app = FastAPI()
 

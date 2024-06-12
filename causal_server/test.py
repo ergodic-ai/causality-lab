@@ -4,7 +4,7 @@ from causal_discovery_algs.icd import LearnStructICD
 from causal_discovery_algs.fci import LearnStructFCI
 from causal_discovery_utils.cond_indep_tests import CondIndepParCorr
 from plot_utils.draw_graph import draw_graph
-from server.utils import adjacency_matrix_to_edges
+from causal_server.utils import adjacency_matrix_to_edges
 
 
 def main():

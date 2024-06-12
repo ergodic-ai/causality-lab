@@ -4,7 +4,7 @@ from typing import Optional
 from effekx.DataManager import DataTypeManager, prep_data
 from scipy.stats import f, pearsonr
 
-from server.utils import generate_retention_data
+from causal_server.utils import generate_retention_data
 
 from sklearn.linear_model import LogisticRegression
 from scipy.stats import chi2

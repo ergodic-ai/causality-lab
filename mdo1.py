@@ -10,7 +10,7 @@ from effekx.DataManager import DataTypeManager, prep_data
 from scipy.stats import chi2, f
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-from server.utils import generate_retention_data
+from causal_server.utils import generate_retention_data
 
 from sklearn.linear_model import LogisticRegression
 from scipy.stats import chi2
