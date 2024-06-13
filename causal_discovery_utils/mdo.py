@@ -3,12 +3,8 @@ import numpy
 from typing import Optional
 from effekx.DataManager import DataTypeManager, prep_data
 from scipy.stats import f, pearsonr
-
-from causal_server.utils import generate_retention_data
-
 from sklearn.linear_model import LogisticRegression
 from scipy.stats import chi2
-
 from causal_discovery_utils.cond_indep_tests import StatCondIndepDF
 
 
